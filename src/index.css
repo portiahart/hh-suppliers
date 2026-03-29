@@ -1,0 +1,49 @@
+@import url('https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,200;0,9..144,300;0,9..144,600;1,9..144,200;1,9..144,300&family=DM+Sans:ital,wght@0,300;0,400;0,500;1,300&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --hh-dark:    #1F2D3D;
+  --hh-haze:    #7A91A5;
+  --hh-ice:     #F2F5F8;
+  --hh-white:   #FFFFFF;
+  --hh-teal:    #4A9B8E;
+  --hh-lemon:   #FFD000;
+  --hh-mango:   #FC0083;
+  --font-display: 'Fraunces', Georgia, serif;
+  --font-body:    'DM Sans', system-ui, sans-serif;
+
+  /* Sub-brand colours */
+  --brand-ba: #DA6E8E;
+  --brand-th: #658D5E;
+  --brand-pm: #FC0083;
+  --brand-ga: #98B250;
+  --brand-nc: #D55B95;
+}
+
+*, *::before, *::after {
+  box-sizing: border-box;
+}
+
+html, body, #root {
+  height: 100%;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  font-family: var(--font-body);
+  font-weight: 300;
+  font-size: 0.875rem;
+  line-height: 1.65;
+  color: var(--hh-dark);
+  background: var(--hh-ice);
+  -webkit-font-smoothing: antialiased;
+}
+
+@keyframes shimmer {
+  0%   { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
