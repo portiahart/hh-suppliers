@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { ArrowLeftIcon, Pencil1Icon } from '@radix-ui/react-icons'
-import { supabase } from '../lib/supabase'
+import { supabase, suppliersQuery } from '../lib/supabase'
 import type { Supplier } from '../types/supplier'
 
 const TABS = ['Resumen', 'Legal', 'Bancario', 'Documentos', 'Evaluación', 'B Corp', 'Gasto'] as const
@@ -17,8 +17,7 @@ export function SupplierProfile() {
   useEffect(() => {
     if (!id) return
     void (async () => {
-      const { data, error } = await supabase
-        .from('accounts_suppliers')
+      const { data, error } = await suppliersQuery()
         .select('*')
         .eq('id', id)
         .single()
@@ -108,6 +107,8 @@ export function SupplierProfile() {
       {/* Tab content */}
       {activeTab === 'Resumen' ? (
         <ResumenTab supplier={supplier} loading={loading} onUpdate={setSupplier} />
+      ) : activeTab === 'Gasto' ? (
+        <GastoTab supplierId={id ?? null} />
       ) : (
         <ComingSoon tab={activeTab} />
       )}
@@ -325,6 +326,261 @@ function ResumenTab({ supplier, loading, onUpdate }: ResumenTabProps) {
       </div>
     </>
   )
+}
+
+/* ─── Gasto Tab ───────────────────────────────────────────── */
+
+interface SpendMonthRow {
+  entity: string
+  year: number
+  month: number
+  amount_cop: number
+}
+
+interface YearData {
+  year: number
+  total: number
+  months: number[] // length 12, index 0 = Jan
+}
+
+interface EntityData {
+  entity: string
+  years: YearData[]
+}
+
+const ENTITY_COLORS: Record<string, { bg: string; text: string }> = {
+  BA: { bg: '#566778', text: '#fff' },
+  TH: { bg: '#B9484E', text: '#fff' },
+  PM: { bg: '#FC0083', text: '#fff' },
+  GA: { bg: '#98B250', text: '#fff' },
+}
+
+const MONTH_LABELS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+
+function formatCOPFull(n: number): string {
+  return '$' + Math.round(n).toLocaleString('es-CO')
+}
+
+function formatCOPShort(n: number): string {
+  if (n >= 1_000_000_000) return '$' + (n / 1_000_000_000).toFixed(1) + 'B'
+  if (n >= 1_000_000)     return '$' + (n / 1_000_000).toFixed(1) + 'M'
+  return '$' + Math.round(n).toLocaleString('es-CO')
+}
+
+function GastoTab({ supplierId }: { supplierId: string | null }) {
+  const [entities, setEntities] = useState<EntityData[]>([])
+  const [loading, setLoading] = useState(true)
+  // Tracks which year pills are expanded: key = "entity|year"
+  const [expanded, setExpanded] = useState<Set<string>>(new Set())
+
+  useEffect(() => {
+    if (!supplierId) return
+    void (async () => {
+      const { data, error } = await supabase
+        .from('suppliers_spend_monthly')
+        .select('entity, year, month, amount_cop')
+        .eq('supplier_id', supplierId)
+        .order('entity')
+        .order('year')
+        .order('month')
+
+      if (error || !data) { setLoading(false); return }
+
+      // Group into EntityData[]
+      const entityMap = new Map<string, Map<number, number[]>>()
+      for (const row of data as SpendMonthRow[]) {
+        if (!entityMap.has(row.entity)) entityMap.set(row.entity, new Map())
+        const yearMap = entityMap.get(row.entity)!
+        if (!yearMap.has(row.year)) yearMap.set(row.year, Array(12).fill(0))
+        yearMap.get(row.year)![row.month - 1] = row.amount_cop
+      }
+
+      const result: EntityData[] = Array.from(entityMap.entries()).map(([entity, yearMap]) => ({
+        entity,
+        years: Array.from(yearMap.entries())
+          .sort(([a], [b]) => a - b)
+          .map(([year, months]) => ({
+            year,
+            months,
+            total: months.reduce((s, v) => s + v, 0),
+          })),
+      }))
+
+      setEntities(result)
+      setLoading(false)
+    })()
+  }, [supplierId])
+
+  const toggleYear = (entity: string, year: number) => {
+    const key = `${entity}|${year}`
+    setExpanded(prev => {
+      const next = new Set(prev)
+      next.has(key) ? next.delete(key) : next.add(key)
+      return next
+    })
+  }
+
+  if (loading) {
+    return (
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 16, paddingTop: 8 }}>
+        {[100, 140, 80].map((w, i) => (
+          <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+            <span style={{ ...shimmerStyle, width: 36, height: 22, borderRadius: 99 }} />
+            <span style={{ ...shimmerStyle, width: w, height: 22, borderRadius: 6 }} />
+            <span style={{ ...shimmerStyle, width: w - 20, height: 22, borderRadius: 6 }} />
+          </div>
+        ))}
+      </div>
+    )
+  }
+
+  if (entities.length === 0) {
+    return (
+      <div style={{ paddingTop: 48, textAlign: 'center' }}>
+        <p style={{
+          fontFamily: 'var(--font-display)',
+          fontWeight: 300,
+          fontStyle: 'italic',
+          fontSize: '1rem',
+          color: 'var(--hh-haze)',
+          margin: 0,
+        }}>
+          Este proveedor no tiene historial de gasto registrado.
+        </p>
+      </div>
+    )
+  }
+
+  return (
+    <div style={{
+      background: 'var(--hh-white)',
+      border: '1px solid rgba(122,145,165,0.2)',
+      borderRadius: 8,
+      padding: '24px 28px',
+    }}>
+      <h2 style={{
+        fontFamily: 'var(--font-display)',
+        fontWeight: 300,
+        fontSize: '1.0625rem',
+        color: 'var(--hh-dark)',
+        margin: '0 0 20px',
+      }}>
+        Historial de Gasto
+      </h2>
+
+      <div>
+        {entities.map(({ entity, years }) => {
+          const color = ENTITY_COLORS[entity] ?? { bg: 'var(--hh-haze)', text: '#fff' }
+
+          // Find which year (if any) is currently expanded for this entity
+          const expandedYear = years.find(y => expanded.has(`${entity}|${y.year}`))
+
+          return (
+            <div key={entity} style={{ display: 'flex', alignItems: 'flex-start', gap: 12, marginBottom: 16 }}>
+              {/* Entity pill */}
+              <span style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                padding: '3px 10px',
+                borderRadius: 99,
+                background: color.bg,
+                color: color.text,
+                fontFamily: 'var(--font-body)',
+                fontWeight: 500,
+                fontSize: '0.6875rem',
+                letterSpacing: '0.05em',
+                flexShrink: 0,
+                marginTop: 3,
+              }}>
+                {entity}
+              </span>
+
+              {/* Year pills + expanded month grid */}
+              <div style={{ flex: 1 }}>
+                <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                  {years.map(({ year, total }) => {
+                    const key = `${entity}|${year}`
+                    const isOpen = expanded.has(key)
+                    return (
+                      <button
+                        key={year}
+                        onClick={() => toggleYear(entity, year)}
+                        style={{
+                          fontFamily: 'var(--font-body)',
+                          fontWeight: 400,
+                          fontSize: '0.75rem',
+                          background: isOpen ? 'var(--hh-dark)' : 'var(--hh-ice)',
+                          color: isOpen ? 'var(--hh-ice)' : 'var(--hh-dark)',
+                          border: `1px solid ${isOpen ? 'var(--hh-dark)' : 'var(--hh-haze)'}`,
+                          borderRadius: 6,
+                          padding: '4px 10px',
+                          cursor: 'pointer',
+                          whiteSpace: 'nowrap',
+                          transition: 'all 0.15s',
+                        }}
+                      >
+                        {year} · {formatCOPShort(total)}
+                      </button>
+                    )
+                  })}
+                </div>
+
+                {/* Expanded month grid */}
+                {expandedYear && (
+                  <div style={{
+                    marginTop: 10,
+                    background: 'var(--hh-white)',
+                    border: '1px solid rgba(122,145,165,0.15)',
+                    borderRadius: 6,
+                    padding: '14px 16px',
+                    display: 'grid',
+                    gridTemplateColumns: 'repeat(12, 1fr)',
+                    gap: '4px 8px',
+                  }}>
+                    {MONTH_LABELS.map((label, i) => {
+                      const amount = expandedYear.months[i]
+                      return (
+                        <div key={label} style={{ textAlign: 'right' }}>
+                          <p style={{
+                            fontFamily: 'var(--font-body)',
+                            fontWeight: 300,
+                            fontSize: '0.6875rem',
+                            color: 'var(--hh-haze)',
+                            margin: '0 0 3px',
+                            textTransform: 'uppercase',
+                            letterSpacing: '0.06em',
+                          }}>
+                            {label}
+                          </p>
+                          <p style={{
+                            fontFamily: 'var(--font-body)',
+                            fontWeight: amount > 0 ? 400 : 300,
+                            fontSize: '0.75rem',
+                            color: amount > 0 ? 'var(--hh-dark)' : 'var(--hh-haze)',
+                            margin: 0,
+                            fontVariantNumeric: 'tabular-nums',
+                          }}>
+                            {amount > 0 ? formatCOPFull(amount) : '—'}
+                          </p>
+                        </div>
+                      )
+                    })}
+                  </div>
+                )}
+              </div>
+            </div>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
+const shimmerStyle: React.CSSProperties = {
+  display: 'inline-block',
+  background: 'linear-gradient(90deg, rgba(122,145,165,0.1) 25%, rgba(122,145,165,0.2) 50%, rgba(122,145,165,0.1) 75%)',
+  backgroundSize: '200% 100%',
+  animation: 'shimmer 1.4s infinite',
 }
 
 /* ─── Shared sub-components ───────────────────────────────── */

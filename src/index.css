@@ -16,11 +16,13 @@
   --font-body:    'DM Sans', system-ui, sans-serif;
 
   /* Sub-brand colours */
-  --brand-ba: #DA6E8E;
-  --brand-th: #658D5E;
+  --brand-ba: #566778;
+  --brand-th: #B9484E;
   --brand-pm: #FC0083;
   --brand-ga: #98B250;
-  --brand-nc: #D55B95;
+  --brand-nc: #EAB955;
+  --brand-mo: #000000;
+  --brand-hh: #1F2D3D;
 }
 
 *, *::before, *::after {

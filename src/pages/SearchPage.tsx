@@ -1,7 +1,12 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { MagnifyingGlassIcon } from '@radix-ui/react-icons'
-import { supabase } from '../lib/supabase'
+import {
+  MagnifyingGlassIcon,
+  CheckCircledIcon,
+  ClockIcon,
+  ExclamationTriangleIcon,
+} from '@radix-ui/react-icons'
+import { supabase, suppliersQuery } from '../lib/supabase'
 import type { Supplier } from '../types/supplier'
 
 /* ─── Types ──────────────────────────────────────────────── */
@@ -10,6 +15,18 @@ interface TopSupplierRow {
   id: string
   nombre: string
   gasto_2024: number
+  entities: Array<{ entity: string; amount_cop: number }>
+}
+
+const ENTITY_COLORS: Record<string, { bg: string; text: string }> = {
+  BA: { bg: '#566778', text: '#fff' },
+  TH: { bg: '#B9484E', text: '#fff' },
+  PM: { bg: '#FC0083', text: '#fff' },
+  GA: { bg: '#98B250', text: '#658D5E' },
+  NC: { bg: '#EAB955', text: '#B9484E' },
+  MO: { bg: '#000000', text: '#fff' },
+  HH: { bg: '#1F2D3D', text: '#F2F5F8' },
+  MA: { bg: '#1F2D3D', text: '#F2F5F8' },
 }
 
 interface Assessment {
@@ -60,8 +77,7 @@ export function SearchPage() {
     }
     setSearching(true)
     void (async () => {
-      const { data } = await supabase
-        .from('accounts_suppliers')
+      const { data } = await suppliersQuery()
         .select('id, name, razon_social, nit')
         .or(`name.ilike.%${debouncedQuery}%,razon_social.ilike.%${debouncedQuery}%,nit.ilike.%${debouncedQuery}%`)
         .limit(8)
@@ -86,12 +102,13 @@ export function SearchPage() {
   const fetchTop20 = useCallback(async () => {
     setLoadingTop(true)
     setTopError(false)
+
+    // Query 1 — totals: all 2024 rows, no limit, group in JS by supplier_id
     const { data, error } = await supabase
       .from('suppliers_spend')
       .select('supplier_id, amount_cop, accounts_suppliers!inner(id, name, razon_social)')
       .eq('year', 2024)
-      .order('amount_cop', { ascending: false })
-      .limit(20)
+      .not('accounts_suppliers.name', 'ilike', 'X -%')
 
     if (error || !data) {
       setTopError(true)
@@ -104,23 +121,52 @@ export function SearchPage() {
       amount_cop: number
       accounts_suppliers: { id: string; name: string; razon_social: string | null } | { id: string; name: string; razon_social: string | null }[]
     }
-    const rows: TopSupplierRow[] = (data as unknown as SpendRow[]).map(r => {
+
+    const grouped = new Map<string, TopSupplierRow>()
+    for (const r of data as unknown as SpendRow[]) {
       const s = Array.isArray(r.accounts_suppliers) ? r.accounts_suppliers[0] : r.accounts_suppliers
-      return {
-        id: s.id,
-        nombre: s.razon_social || s.name,
-        gasto_2024: r.amount_cop,
+      const existing = grouped.get(r.supplier_id)
+      if (existing) {
+        existing.gasto_2024 += r.amount_cop
+      } else {
+        grouped.set(r.supplier_id, { id: s.id, nombre: s.razon_social || s.name, gasto_2024: r.amount_cop, entities: [] })
       }
-    })
+    }
+    const rows = Array.from(grouped.values())
+      .sort((a, b) => b.gasto_2024 - a.gasto_2024)
+      .slice(0, 20)
+
+    // Query 2 — entity breakdown for the top 20 supplier IDs
+    const top20ids = rows.map(r => r.id)
+    if (top20ids.length > 0) {
+      type EntityRow = { supplier_id: string; entity: string; amount_cop: number }
+      const { data: eData } = await supabase
+        .from('suppliers_spend')
+        .select('supplier_id, entity, amount_cop')
+        .eq('year', 2024)
+        .in('supplier_id', top20ids)
+
+      if (eData) {
+        const entityMap = new Map<string, Array<{ entity: string; amount_cop: number }>>()
+        for (const e of eData as EntityRow[]) {
+          const list = entityMap.get(e.supplier_id) ?? []
+          list.push({ entity: e.entity, amount_cop: e.amount_cop })
+          entityMap.set(e.supplier_id, list)
+        }
+        for (const row of rows) {
+          row.entities = entityMap.get(row.id) ?? []
+        }
+      }
+    }
+
     setTopSuppliers(rows)
 
-    // Fetch assessments for these suppliers
-    if (rows.length > 0) {
-      const ids = rows.map(r => r.id)
+    // Assessments for top 20
+    if (top20ids.length > 0) {
       const { data: aData } = await supabase
         .from('suppliers_assessment')
         .select('supplier_id, pass')
-        .in('supplier_id', ids)
+        .in('supplier_id', top20ids)
       const map = new Map<string, boolean | null>()
       ;(aData as Assessment[] ?? []).forEach(a => map.set(a.supplier_id, a.pass))
       setAssessments(map)
@@ -132,20 +178,19 @@ export function SearchPage() {
 
   /* ── Render ───────────────────────────────────────────── */
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 32 }}>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 40 }}>
 
-      {/* ── Section 1: Header bar ───────────────────────── */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 16, flexWrap: 'wrap' }}>
+      {/* ── Section 1: Hero search ──────────────────────── */}
+      <section>
         <h1 style={pageTitleStyle}>Proveedores</h1>
 
-        {/* Typeahead search */}
-        <div ref={searchRef} style={{ position: 'relative', width: 300, marginLeft: 'auto' }}>
+        <div ref={searchRef} style={{ position: 'relative', maxWidth: 640 }}>
           <MagnifyingGlassIcon
-            width={15}
-            height={15}
+            width={18}
+            height={18}
             style={{
               position: 'absolute',
-              left: 12,
+              left: 16,
               top: '50%',
               transform: 'translateY(-50%)',
               color: searching ? 'var(--hh-teal)' : 'var(--hh-haze)',
@@ -158,19 +203,20 @@ export function SearchPage() {
             value={query}
             onChange={e => { setQuery(e.target.value); setShowDropdown(false) }}
             onFocus={() => { if (suggestions.length) setShowDropdown(true) }}
-            placeholder="Buscar proveedor o NIT…"
+            placeholder="Buscar proveedor por nombre o NIT…"
             style={{
               width: '100%',
-              padding: '8px 12px 8px 36px',
+              padding: '14px 16px 14px 46px',
               fontFamily: 'var(--font-body)',
               fontWeight: 300,
-              fontSize: '0.8125rem',
+              fontSize: '1rem',
               color: 'var(--hh-dark)',
               background: 'var(--hh-white)',
               border: '1px solid rgba(122,145,165,0.4)',
-              borderRadius: 6,
+              borderRadius: 8,
               outline: 'none',
               boxSizing: 'border-box',
+              boxShadow: '0 2px 8px rgba(0,0,0,0.06)',
             }}
             onFocusCapture={e => { e.currentTarget.style.borderColor = 'var(--hh-teal)' }}
             onBlurCapture={e => { e.currentTarget.style.borderColor = 'rgba(122,145,165,0.4)' }}
@@ -178,20 +224,7 @@ export function SearchPage() {
 
           {/* Dropdown */}
           {showDropdown && suggestions.length > 0 && (
-            <div
-              style={{
-                position: 'absolute',
-                top: 'calc(100% + 4px)',
-                left: 0,
-                right: 0,
-                background: 'var(--hh-white)',
-                border: '1px solid rgba(122,145,165,0.25)',
-                borderRadius: 6,
-                boxShadow: '0 4px 16px rgba(0,0,0,0.10)',
-                zIndex: 50,
-                overflow: 'hidden',
-              }}
-            >
+            <div style={dropdownStyle}>
               {suggestions.map(s => (
                 <button
                   key={s.id}
@@ -204,7 +237,7 @@ export function SearchPage() {
                     display: 'block',
                     width: '100%',
                     textAlign: 'left',
-                    padding: '9px 14px',
+                    padding: '10px 16px',
                     background: 'transparent',
                     border: 'none',
                     borderBottom: '1px solid rgba(122,145,165,0.1)',
@@ -214,7 +247,7 @@ export function SearchPage() {
                   onMouseEnter={e => { e.currentTarget.style.background = 'var(--hh-ice)' }}
                   onMouseLeave={e => { e.currentTarget.style.background = 'transparent' }}
                 >
-                  <span style={{ display: 'block', fontSize: '0.8125rem', fontWeight: 400, color: 'var(--hh-dark)' }}>
+                  <span style={{ display: 'block', fontSize: '0.875rem', fontWeight: 400, color: 'var(--hh-dark)' }}>
                     {s.razon_social || s.name}
                   </span>
                   {s.nit && (
@@ -228,47 +261,63 @@ export function SearchPage() {
           )}
 
           {showDropdown && query.trim() && suggestions.length === 0 && !searching && (
-            <div
-              style={{
-                position: 'absolute',
-                top: 'calc(100% + 4px)',
-                left: 0,
-                right: 0,
-                background: 'var(--hh-white)',
-                border: '1px solid rgba(122,145,165,0.25)',
-                borderRadius: 6,
-                padding: '12px 14px',
-                zIndex: 50,
-              }}
-            >
-              <span style={{ fontSize: '0.8125rem', color: 'var(--hh-haze)', fontFamily: 'var(--font-body)' }}>
+            <div style={{ ...dropdownStyle, padding: '12px 16px' }}>
+              <span style={{ fontSize: '0.875rem', color: 'var(--hh-haze)', fontFamily: 'var(--font-body)' }}>
                 Sin resultados
               </span>
             </div>
           )}
         </div>
 
-        <button
-          onClick={() => navigate('/new')}
-          style={{
-            background: 'var(--hh-teal)',
-            color: '#fff',
-            fontFamily: 'var(--font-body)',
-            fontWeight: 500,
-            fontSize: '0.8125rem',
-            border: 'none',
-            borderRadius: 6,
-            padding: '8px 16px',
-            cursor: 'pointer',
-            whiteSpace: 'nowrap',
-            flexShrink: 0,
-          }}
-        >
-          + Nuevo Proveedor
-        </button>
-      </div>
+        {/* Sub-hint */}
+        <p style={{ margin: '10px 0 0', fontSize: '0.8125rem', color: 'var(--hh-haze)', fontWeight: 300 }}>
+          ¿No encuentras el proveedor?{' '}
+          <button
+            onClick={() => navigate('/new')}
+            style={{
+              background: 'none',
+              border: 'none',
+              padding: 0,
+              fontFamily: 'var(--font-body)',
+              fontSize: '0.8125rem',
+              fontWeight: 400,
+              color: 'var(--hh-teal)',
+              cursor: 'pointer',
+              textDecoration: 'underline',
+              textUnderlineOffset: 2,
+            }}
+          >
+            Agregar nuevo proveedor →
+          </button>
+        </p>
+      </section>
 
-      {/* ── Section 2: Top 20 ───────────────────────────── */}
+      {/* ── Section 2: Action cards ──────────────────────── */}
+      <section>
+        <div style={{
+          display: 'grid',
+          gridTemplateColumns: 'repeat(3, 1fr)',
+          gap: 16,
+        }}>
+          <ActionCard
+            icon={<CheckCircledIcon width={20} height={20} />}
+            title="Facturas Aprobadas"
+            accent="var(--hh-teal)"
+          />
+          <ActionCard
+            icon={<ClockIcon width={20} height={20} />}
+            title="Facturas Pendiente Aprobación"
+            accent="var(--hh-lemon)"
+          />
+          <ActionCard
+            icon={<ExclamationTriangleIcon width={20} height={20} />}
+            title="Cartera Vencida — Facturas por Pagar Urgente"
+            accent="var(--hh-mango)"
+          />
+        </div>
+      </section>
+
+      {/* ── Section 3: Top 20 ───────────────────────────── */}
       <section>
         <h2 style={sectionHeadingStyle}>Top 20 · Gasto 2024</h2>
 
@@ -277,6 +326,7 @@ export function SearchPage() {
             <thead>
               <tr style={{ borderBottom: '1px solid rgba(122,145,165,0.2)' }}>
                 <Th align="left">Nombre</Th>
+                <Th align="left">Entidades</Th>
                 <Th align="left">Evaluación</Th>
                 <Th align="right">Gasto 2024</Th>
                 <Th align="right">Pendiente</Th>
@@ -286,25 +336,21 @@ export function SearchPage() {
             <tbody>
               {loadingTop ? (
                 Array.from({ length: 5 }).map((_, i) => (
-                  <SkeletonRow key={i} cols={5} even={i % 2 === 1} />
+                  <SkeletonRow key={i} cols={6} even={i % 2 === 1} />
                 ))
               ) : topError ? (
                 <tr>
-                  <td colSpan={5} style={{ padding: '48px 16px', textAlign: 'center' }}>
+                  <td colSpan={6} style={{ padding: '48px 16px', textAlign: 'center' }}>
                     <span style={{ fontFamily: 'var(--font-display)', fontWeight: 300, fontStyle: 'italic', fontSize: '1rem', color: 'var(--hh-haze)' }}>
                       No se pudieron cargar los datos de gasto.
-                    </span>
-                    <br />
-                    <span style={{ fontSize: '0.75rem', color: 'var(--hh-haze)', fontFamily: 'var(--font-body)' }}>
-                      Asegúrate de que la función <code>get_top_suppliers_60d</code> esté creada en Supabase.
                     </span>
                   </td>
                 </tr>
               ) : topSuppliers.length === 0 ? (
                 <tr>
-                  <td colSpan={5} style={{ padding: '48px 16px', textAlign: 'center' }}>
+                  <td colSpan={6} style={{ padding: '48px 16px', textAlign: 'center' }}>
                     <span style={{ fontFamily: 'var(--font-display)', fontWeight: 300, fontStyle: 'italic', fontSize: '1rem', color: 'var(--hh-haze)' }}>
-                      Sin transacciones en los últimos 60 días.
+                      Sin datos de gasto para 2024.
                     </span>
                   </td>
                 </tr>
@@ -316,7 +362,6 @@ export function SearchPage() {
                       key={row.id}
                       style={{ background: idx % 2 === 1 ? 'var(--hh-ice)' : 'var(--hh-white)' }}
                     >
-                      {/* Nombre */}
                       <td style={tdStyle}>
                         <button
                           onClick={() => navigate(`/suppliers/${row.id}`)}
@@ -340,21 +385,23 @@ export function SearchPage() {
                           {row.nombre}
                         </button>
                       </td>
-
-                      {/* Evaluación */}
+                      <td style={tdStyle}>
+                        <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+                          {row.entities
+                            .filter(e => e.amount_cop > 0)
+                            .sort((a, b) => b.amount_cop - a.amount_cop)
+                            .map(e => (
+                              <EntityPill key={e.entity} entity={e.entity} amount={e.amount_cop} />
+                            ))}
+                        </div>
+                      </td>
                       <td style={tdStyle}>
                         <AssessmentBadge pass={assessment} />
                       </td>
-
-                      {/* Gasto 60d */}
                       <td style={{ ...tdStyle, textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>
                         {formatCOP(row.gasto_2024)}
                       </td>
-
-                      {/* Pendiente */}
                       <td style={{ ...tdStyle, textAlign: 'right', color: 'var(--hh-haze)' }}>—</td>
-
-                      {/* Zona proveedor */}
                       <td style={tdStyle}>
                         <button
                           onClick={() => navigate(`/suppliers/${row.id}`)}
@@ -383,35 +430,105 @@ export function SearchPage() {
         </div>
       </section>
 
-      {/* ── Section 3: Facturas Vencidas ────────────────── */}
-      <section>
-        <div
-          style={{
-            background: 'var(--hh-white)',
-            border: '1px solid rgba(122,145,165,0.2)',
-            borderRadius: 8,
-            padding: '28px 32px',
-          }}
-        >
-          <h2 style={sectionHeadingStyle}>Facturas Vencidas</h2>
-          <p style={{
-            fontFamily: 'var(--font-body)',
-            fontWeight: 300,
-            fontSize: '0.875rem',
-            color: 'var(--hh-haze)',
-            margin: 0,
-            lineHeight: 1.65,
-          }}>
-            Próximamente — integración con módulo de facturación.
-          </p>
-        </div>
-      </section>
-
     </div>
   )
 }
 
 /* ─── Sub-components ─────────────────────────────────────── */
+
+function EntityPill({ entity, amount }: { entity: string; amount: number }) {
+  const [show, setShow] = useState(false)
+  const color = ENTITY_COLORS[entity.toUpperCase()] ?? { bg: 'var(--hh-haze)', text: '#fff' }
+  return (
+    <span style={{ position: 'relative', display: 'inline-block' }}>
+      <span
+        onMouseEnter={() => setShow(true)}
+        onMouseLeave={() => setShow(false)}
+        style={{
+          display: 'inline-block',
+          padding: '2px 7px',
+          borderRadius: 99,
+          background: color.bg,
+          color: color.text,
+          fontSize: '0.6875rem',
+          fontWeight: 500,
+          letterSpacing: '0.05em',
+          cursor: 'default',
+          userSelect: 'none',
+        }}
+      >
+        {entity.toUpperCase()}
+      </span>
+      {show && (
+        <span style={{
+          position: 'absolute',
+          bottom: 'calc(100% + 5px)',
+          left: '50%',
+          transform: 'translateX(-50%)',
+          background: 'var(--hh-dark)',
+          color: 'var(--hh-ice)',
+          fontFamily: 'var(--font-body)',
+          fontSize: '0.6875rem',
+          fontWeight: 400,
+          padding: '4px 8px',
+          borderRadius: 4,
+          whiteSpace: 'nowrap',
+          pointerEvents: 'none',
+          zIndex: 100,
+        }}>
+          {formatCOP(amount)}
+        </span>
+      )}
+    </span>
+  )
+}
+
+function ActionCard({
+  icon,
+  title,
+  accent,
+}: {
+  icon: React.ReactNode
+  title: string
+  accent: string
+}) {
+  return (
+    <div
+      style={{
+        background: 'var(--hh-white)',
+        border: '1px solid rgba(122,145,165,0.2)',
+        borderLeft: `4px solid ${accent}`,
+        borderRadius: 8,
+        padding: '20px 24px',
+        display: 'flex',
+        flexDirection: 'column',
+        gap: 12,
+      }}
+    >
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+        <span style={{ color: accent, flexShrink: 0 }}>{icon}</span>
+        <span style={{
+          fontFamily: 'var(--font-body)',
+          fontWeight: 500,
+          fontSize: '0.8125rem',
+          color: 'var(--hh-dark)',
+          lineHeight: 1.3,
+        }}>
+          {title}
+        </span>
+      </div>
+      <p style={{
+        fontFamily: 'var(--font-body)',
+        fontWeight: 300,
+        fontSize: '0.8125rem',
+        color: 'var(--hh-haze)',
+        margin: 0,
+      }}>
+        Próximamente
+      </p>
+    </div>
+  )
+}
 
 function Th({ children, align }: { children: React.ReactNode; align: 'left' | 'right' }) {
   return (
@@ -507,8 +624,7 @@ const pageTitleStyle: React.CSSProperties = {
   textTransform: 'uppercase',
   letterSpacing: '0.12em',
   color: 'var(--hh-dark)',
-  margin: 0,
-  flexShrink: 0,
+  margin: '0 0 16px',
 }
 
 const sectionHeadingStyle: React.CSSProperties = {
@@ -533,4 +649,17 @@ const tdStyle: React.CSSProperties = {
   color: 'var(--hh-dark)',
   padding: '11px 16px',
   borderBottom: '1px solid rgba(122,145,165,0.08)',
+}
+
+const dropdownStyle: React.CSSProperties = {
+  position: 'absolute',
+  top: 'calc(100% + 4px)',
+  left: 0,
+  right: 0,
+  background: 'var(--hh-white)',
+  border: '1px solid rgba(122,145,165,0.25)',
+  borderRadius: 8,
+  boxShadow: '0 4px 20px rgba(0,0,0,0.10)',
+  zIndex: 50,
+  overflow: 'hidden',
 }
