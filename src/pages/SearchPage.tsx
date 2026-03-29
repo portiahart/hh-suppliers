@@ -102,13 +102,16 @@ export function SearchPage() {
     type SpendRow = {
       supplier_id: string
       amount_cop: number
-      accounts_suppliers: { id: string; name: string; razon_social: string | null }
+      accounts_suppliers: { id: string; name: string; razon_social: string | null } | { id: string; name: string; razon_social: string | null }[]
     }
-    const rows: TopSupplierRow[] = (data as SpendRow[]).map(r => ({
-      id: r.accounts_suppliers.id,
-      nombre: r.accounts_suppliers.razon_social || r.accounts_suppliers.name,
-      gasto_2024: r.amount_cop,
-    }))
+    const rows: TopSupplierRow[] = (data as unknown as SpendRow[]).map(r => {
+      const s = Array.isArray(r.accounts_suppliers) ? r.accounts_suppliers[0] : r.accounts_suppliers
+      return {
+        id: s.id,
+        nombre: s.razon_social || s.name,
+        gasto_2024: r.amount_cop,
+      }
+    })
     setTopSuppliers(rows)
 
     // Fetch assessments for these suppliers
