@@ -77,8 +77,15 @@ export function SearchPage() {
     }
     setSearching(true)
     void (async () => {
+      const term = debouncedQuery.trim()
+      const cleanNit = term.replace(/\D/g, '')
+      const filters = [
+        `name.ilike.%${term}%`,
+        `razon_social.ilike.%${term}%`,
+        ...(cleanNit.length > 0 ? [`nit.ilike.%${cleanNit}%`] : []),
+      ]
       const { data } = await suppliersQuery('id, name, razon_social, nit')
-        .or(`name.ilike.%${debouncedQuery}%,razon_social.ilike.%${debouncedQuery}%,nit.ilike.%${debouncedQuery}%`)
+        .or(filters.join(','))
         .limit(8)
       setSuggestions((data as unknown as Supplier[]) ?? [])
       setShowDropdown(true)
@@ -250,14 +257,16 @@ export function SearchPage() {
                   onMouseEnter={e => { e.currentTarget.style.background = 'var(--hh-ice)' }}
                   onMouseLeave={e => { e.currentTarget.style.background = 'transparent' }}
                 >
-                  <span style={{ display: 'block', fontSize: '0.875rem', fontWeight: 400, color: 'var(--hh-dark)' }}>
-                    {s.razon_social || s.name}
-                  </span>
-                  {s.nit && (
-                    <span style={{ display: 'block', fontSize: '0.75rem', fontWeight: 300, color: 'var(--hh-haze)', marginTop: 1 }}>
-                      NIT {s.nit}
+                  <span style={{ display: 'flex', alignItems: 'baseline', gap: 10 }}>
+                    <span style={{ fontSize: '0.875rem', fontWeight: 400, color: 'var(--hh-dark)', flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      {s.razon_social ?? s.name}
                     </span>
-                  )}
+                    {s.nit && (
+                      <span style={{ fontSize: '0.75rem', fontWeight: 300, color: 'var(--hh-haze)', flexShrink: 0 }}>
+                        {s.nit}
+                      </span>
+                    )}
+                  </span>
                 </button>
               ))}
             </div>
