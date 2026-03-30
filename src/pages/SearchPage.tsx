@@ -146,14 +146,18 @@ export function SearchPage() {
         .in('supplier_id', top20ids)
 
       if (eData) {
-        const entityMap = new Map<string, Array<{ entity: string; amount_cop: number }>>()
+        // Group by supplier_id → entity, summing monthly amounts
+        const entityMap = new Map<string, Map<string, number>>()
         for (const e of eData as EntityRow[]) {
-          const list = entityMap.get(e.supplier_id) ?? []
-          list.push({ entity: e.entity, amount_cop: e.amount_cop })
-          entityMap.set(e.supplier_id, list)
+          const byEntity = entityMap.get(e.supplier_id) ?? new Map<string, number>()
+          byEntity.set(e.entity, (byEntity.get(e.entity) ?? 0) + e.amount_cop)
+          entityMap.set(e.supplier_id, byEntity)
         }
         for (const row of rows) {
-          row.entities = entityMap.get(row.id) ?? []
+          const byEntity = entityMap.get(row.id)
+          row.entities = byEntity
+            ? Array.from(byEntity.entries()).map(([entity, amount_cop]) => ({ entity, amount_cop }))
+            : []
         }
       }
     }
