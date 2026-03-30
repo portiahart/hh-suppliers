@@ -418,8 +418,8 @@ function buildRecord(
       : null,
     no_fac:          cell(row, colMap.noFac) || null,
     moneda:          colMap.moneda >= 0 ? (cell(row, colMap.moneda).toUpperCase() || null) : null,
-    pagado:          isCpp ? null : (cell(row, colMap.pagado) || null),
-    aprobado:        cell(row, colMap.aprobado) || null, // kept for both; pagado only for expense sources
+    pagado:          isCpp ? null : (() => { const v = cell(row, colMap.pagado).toUpperCase(); return v === 'TRUE' || v === 'SI' ? 'SI' : v === 'FALSE' || v === 'NO' ? 'NO' : v || null })(),
+    aprobado:        (() => { const v = cell(row, colMap.aprobado).toUpperCase(); return v === 'TRUE' || v === 'SI' ? 'SI' : v === 'FALSE' || v === 'NO' ? 'NO' : v || null })(),
     orden_prioridad: cell(row, colMap.ordenPrioridad) || null,
     doc_url:         docUrl,
   }
