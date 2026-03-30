@@ -161,16 +161,23 @@ Deno.serve(async (req: Request) => {
 
     /* ── 2. Fetch Sheets data in parallel ───────────────── */
     const [suppliersData, ...entityData] = await Promise.all([
-      fetchNamedRange('SUPPLIERS', accessToken),
+      fetchNamedRange('PROVNIT', accessToken),
       ...ENTITY_RANGES.map(e => fetchNamedRange(e.range, accessToken)),
     ])
 
-    // SUPPLIERS is a single-column range — extract flat list of names
-    const supplierNames: Array<string | null> = suppliersData.map(row => {
+    // SUPPLIERS has col 0 = name, col 1 = NIT
+    interface SupplierSheetRow { name: string; nit: string | null }
+    const supplierRows: Array<SupplierSheetRow | null> = suppliersData.map(row => {
       const val = row[0]
       if (val === null || val === undefined || String(val).trim() === '') return null
-      return String(val).trim()
+      const rawNit = row[1]
+      const nit = (rawNit !== null && rawNit !== undefined && String(rawNit).trim() !== '')
+        ? String(rawNit).replace(/\D/g, '').trim() || null
+        : null
+      return { name: String(val).trim(), nit }
     })
+    // Keep backward-compat alias used in the loop below
+    const supplierNames = supplierRows.map(r => r?.name ?? null)
 
     /* ── 3. Bulk fetch accounts_suppliers → name→id map ─── */
     const supabase = createClient(
@@ -180,14 +187,20 @@ Deno.serve(async (req: Request) => {
 
     const { data: allSuppliers, error: supplierFetchError } = await supabase
       .from('accounts_suppliers')
-      .select('id, name')
+      .select('id, name, nit')
 
     if (supplierFetchError) throw new Error(`Failed to fetch suppliers: ${supplierFetchError.message}`)
 
+    type DbSupplier = { id: string; name: string; nit: string | null }
+    const dbSuppliers = allSuppliers as DbSupplier[]
+
     // Key: lower(trim(name)) → uuid
     const supplierMap = new Map<string, string>(
-      (allSuppliers as Array<{ id: string; name: string }>)
-        .map(s => [s.name.trim().toLowerCase(), s.id])
+      dbSuppliers.map(s => [s.name.trim().toLowerCase(), s.id])
+    )
+    // Track which db rows already have a NIT so we don't overwrite them
+    const dbNitById = new Map<string, string | null>(
+      dbSuppliers.map(s => [s.id, s.nit])
     )
 
     /* ── 4. Build upsert rows ───────────────────────────── */
@@ -234,6 +247,29 @@ Deno.serve(async (req: Request) => {
       }
     }
 
+    /* ── 4b. Backfill NIT on accounts_suppliers where null ──── */
+    // Build a unique name→nit map from the sheet (first non-null NIT wins)
+    const sheetNitByName = new Map<string, string>()
+    for (const row of supplierRows) {
+      if (!row || !row.nit) continue
+      const key = row.name.toLowerCase()
+      if (!sheetNitByName.has(key)) sheetNitByName.set(key, row.nit)
+    }
+    // Collect supplier IDs that have a sheet NIT but no db NIT
+    const nitUpdates: Array<{ id: string; nit: string }> = []
+    for (const [nameLower, sheetNit] of sheetNitByName) {
+      const supplierId = supplierMap.get(nameLower)
+      if (!supplierId) continue
+      if (dbNitById.get(supplierId)) continue // already has one
+      nitUpdates.push({ id: supplierId, nit: sheetNit })
+    }
+    // Update in parallel (typically small set)
+    await Promise.all(
+      nitUpdates.map(({ id, nit }) =>
+        supabase.from('accounts_suppliers').update({ nit }).eq('id', id).is('nit', null)
+      )
+    )
+
     /* ── 5. Deduplicate by (supplier_id, entity, year, month) ─
           The same supplier name can appear on multiple rows in the
           SUPPLIERS sheet. Collapse those into one row by summing. */
@@ -256,6 +292,7 @@ Deno.serve(async (req: Request) => {
       JSON.stringify({
         synced: deduped.length,
         skipped,
+        nitsUpdated: nitUpdates.length,
         unmatched: Array.from(unmatchedSet).sort(),
       }),
       { headers },
