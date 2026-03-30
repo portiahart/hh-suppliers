@@ -177,7 +177,6 @@ export function SearchPage() {
         .select('nit, importe_cop, empresa, empresa_split')
         .gte('fecha_factura', cutoffStr)
         .not('nit', 'is', null)
-        .neq('nit', 'Falta NIT')
         .range(from, from + PAGE - 1)
       if (error) { setTopError(true); setLoadingTop(false); return }
       if (!data || data.length === 0) break
