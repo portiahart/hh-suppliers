@@ -161,7 +161,7 @@ Deno.serve(async (req: Request) => {
 
     /* ── 2. Fetch Sheets data in parallel ───────────────── */
     const [suppliersData, ...entityData] = await Promise.all([
-      fetchNamedRange('PROVNIT', accessToken),
+      fetchNamedRange('MAIN', accessToken),
       ...ENTITY_RANGES.map(e => fetchNamedRange(e.range, accessToken)),
     ])
 
@@ -176,8 +176,34 @@ Deno.serve(async (req: Request) => {
         .replace(/\s+/g, ' ')           // re-collapse after dot removal
         .trim()
 
-    // SUPPLIERS has col 0 = name, col 1 = NIT
-    interface SupplierSheetRow { name: string; nit: string | null }
+    // MAIN column indices
+    // 0  PROVEEDOR (name)
+    // 1  NIT (9 digits)
+    // 2  documento_tipo (NIT/CC/CE/…)
+    // 3  nombre_operativo
+    // 4  tipo_persona (JURIDICA / NATURAL)
+    // 11 email
+    // 12 telefono
+    // 19 ACTIVE / INACTIVE
+    // 40 categoria
+    const strCell = (row: unknown[], idx: number): string | null => {
+      const v = row[idx]
+      if (v === null || v === undefined || String(v).trim() === '') return null
+      return String(v).trim()
+    }
+
+    interface SupplierSheetRow {
+      name: string
+      nit: string | null
+      documento_tipo: string | null
+      nombre_operativo: string | null
+      tipo_persona: string | null
+      email: string | null
+      telefono: string | null
+      status: 'ACTIVE' | 'INACTIVE' | null
+      categoria: string | null
+    }
+
     const supplierRows: Array<SupplierSheetRow | null> = suppliersData.map(row => {
       const val = row[0]
       if (val === null || val === undefined || String(val).trim() === '') return null
@@ -185,9 +211,33 @@ Deno.serve(async (req: Request) => {
       const nit = (rawNit !== null && rawNit !== undefined && String(rawNit).trim() !== '')
         ? String(rawNit).replace(/\D/g, '').trim() || null
         : null
-      return { name: String(val).trim(), nit }
+      const VALID_DOC = new Set(['NIT','CC','CE','TI','TE','RC','PS','DE','NIT-E','NUIP'])
+      const rawDoc = strCell(row, 2)?.toUpperCase() ?? ''
+      const documento_tipo = VALID_DOC.has(rawDoc) ? rawDoc : null
+
+      const rawTipo = strCell(row, 4)?.toUpperCase() ?? ''
+      const tipo_persona: 'JURIDICA' | 'NATURAL' | null =
+        rawTipo.includes('JURIDICA') || rawTipo === 'J' ? 'JURIDICA'
+        : rawTipo.includes('NATURAL') || rawTipo === 'N' ? 'NATURAL'
+        : null
+
+      const rawStatus = strCell(row, 19)?.toUpperCase()
+      const status: 'ACTIVE' | 'INACTIVE' | null =
+        rawStatus === 'ACTIVE' ? 'ACTIVE' : rawStatus === 'INACTIVE' ? 'INACTIVE' : null
+
+      return {
+        name: String(val).trim(),
+        nit,
+        documento_tipo,
+        nombre_operativo: strCell(row, 3),
+        tipo_persona,
+        email: strCell(row, 11),
+        telefono: strCell(row, 12),
+        status,
+        categoria: strCell(row, 40),
+      }
     })
-    // Keep backward-compat alias used in the loop below
+    // Keep backward-compat alias used in the spend loop below
     const supplierNames = supplierRows.map(r => r?.name ?? null)
 
     /* ── 3. Bulk fetch accounts_suppliers → name→id map ─── */
@@ -215,10 +265,6 @@ Deno.serve(async (req: Request) => {
     // Key: normName(name) → uuid
     const supplierMap = new Map<string, string>(
       dbSuppliers.map(s => [normName(s.name), s.id])
-    )
-    // Track which db rows already have a NIT so we don't overwrite them
-    const dbNitById = new Map<string, string | null>(
-      dbSuppliers.map(s => [s.id, s.nit])
     )
 
     /* ── 4. Build upsert rows ───────────────────────────── */
@@ -265,28 +311,63 @@ Deno.serve(async (req: Request) => {
       }
     }
 
-    /* ── 4b. Backfill NIT on accounts_suppliers where null ──── */
-    // Build a unique name→nit map from the sheet (first non-null NIT wins)
-    const sheetNitByName = new Map<string, string>()
+    /* ── 4b. Sync accounts_suppliers fields from MAIN (sheet is master) ── */
+    // Build de-duped map: normName → first matching SupplierSheetRow
+    const sheetRowByName = new Map<string, SupplierSheetRow>()
     for (const row of supplierRows) {
-      if (!row || !row.nit) continue
+      if (!row) continue
       const key = normName(row.name)
-      if (!sheetNitByName.has(key)) sheetNitByName.set(key, row.nit)
+      if (!sheetRowByName.has(key)) sheetRowByName.set(key, row)
     }
-    // Collect supplier IDs that have a sheet NIT but no db NIT
-    const nitUpdates: Array<{ id: string; nit: string }> = []
-    for (const [nameLower, sheetNit] of sheetNitByName) {
-      const supplierId = supplierMap.get(nameLower)
+    // Collect update payloads for every matched supplier
+    const supplierUpdates: Array<Record<string, unknown>> = []
+    const nitUpdateMap = new Map<string, string>() // supplierId → nit
+    for (const [key, sheetRow] of sheetRowByName) {
+      const supplierId = supplierMap.get(key)
       if (!supplierId) continue
-      if (dbNitById.get(supplierId)) continue // already has one
-      nitUpdates.push({ id: supplierId, nit: sheetNit })
+      const payload: Record<string, unknown> = {
+        id: supplierId,
+        name: sheetRow.name,
+        razon_social: sheetRow.name,
+        documento_tipo: sheetRow.documento_tipo,
+        nombre_operativo: sheetRow.nombre_operativo,
+        tipo_persona: sheetRow.tipo_persona,
+        email: sheetRow.email,
+        telefono: sheetRow.telefono,
+        categoria: sheetRow.categoria,
+      }
+      // Only include status when sheet explicitly sets it (NOT NULL constraint in DB)
+      if (sheetRow.status !== null) payload.status = sheetRow.status
+      supplierUpdates.push(payload)
+      // NIT is handled separately (unique constraint — must detect conflicts)
+      if (sheetRow.nit) nitUpdateMap.set(supplierId, sheetRow.nit)
     }
-    // Update in parallel (typically small set)
-    await Promise.all(
-      nitUpdates.map(({ id, nit }) =>
-        supabase.from('accounts_suppliers').update({ nit }).eq('id', id).is('nit', null)
+    // Update non-NIT fields in parallel batches
+    const UPDATE_CONCURRENCY = 10
+    for (let i = 0; i < supplierUpdates.length; i += UPDATE_CONCURRENCY) {
+      const results = await Promise.all(
+        supplierUpdates.slice(i, i + UPDATE_CONCURRENCY).map(({ id, ...fields }) =>
+          supabase.from('accounts_suppliers').update(fields).eq('id', id as string)
+        )
       )
-    )
+      const failed = results.find(r => r.error)
+      if (failed?.error) throw new Error(`Supplier update error: ${failed.error.message}`)
+    }
+
+    // Update NITs in parallel batches — catch unique constraint conflicts per-item
+    const nitEntries = Array.from(nitUpdateMap.entries())
+    const nitConflicts: string[] = []
+    for (let i = 0; i < nitEntries.length; i += UPDATE_CONCURRENCY) {
+      const results = await Promise.all(
+        nitEntries.slice(i, i + UPDATE_CONCURRENCY).map(([supplierId, nit]) =>
+          supabase.from('accounts_suppliers').update({ nit }).eq('id', supplierId)
+            .then(r => ({ supplierId, nit, error: r.error }))
+        )
+      )
+      for (const r of results) {
+        if (r.error) nitConflicts.push(`${r.supplierId}: ${r.nit} — ${r.error.message}`)
+      }
+    }
 
     /* ── 5. Deduplicate by (supplier_id, entity, year, month) ─
           The same supplier name can appear on multiple rows in the
@@ -306,18 +387,12 @@ Deno.serve(async (req: Request) => {
     /* ── 6. Upsert in batches ───────────────────────────── */
     await upsertBatch(supabase, deduped)
 
-    // Suppliers in PROVNIT with a name but no NIT value in the sheet
-    const missingNitInSheet = supplierRows
-      .filter((r): r is SupplierSheetRow => r !== null && !r.nit)
-      .map(r => r.name)
-      .sort()
-
     return new Response(
       JSON.stringify({
         synced: deduped.length,
         skipped,
-        nitsUpdated: nitUpdates.length,
-        missingNitInSheet,
+        suppliersUpdated: supplierUpdates.length,
+        nitConflicts,
         unmatched: Array.from(unmatchedSet).sort(),
       }),
       { headers },

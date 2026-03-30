@@ -393,7 +393,7 @@ function GastoTab({ supplierId }: { supplierId: string | null }) {
         if (!entityMap.has(row.entity)) entityMap.set(row.entity, new Map())
         const yearMap = entityMap.get(row.entity)!
         if (!yearMap.has(row.year)) yearMap.set(row.year, Array(12).fill(0))
-        yearMap.get(row.year)![row.month - 1] = row.amount_cop
+        yearMap.get(row.year)![row.month - 1] = Number(row.amount_cop)
       }
 
       const result: EntityData[] = Array.from(entityMap.entries()).map(([entity, yearMap]) => ({

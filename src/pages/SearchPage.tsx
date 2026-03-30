@@ -14,8 +14,14 @@ import type { Supplier } from '../types/supplier'
 interface TopSupplierRow {
   id: string
   nombre: string
-  gasto_2025: number
+  nit: string
+  gasto: number
   entities: Array<{ entity: string; amount_cop: number }>
+}
+
+interface CardData {
+  count: number
+  total: number
 }
 
 const ENTITY_COLORS: Record<string, { bg: string; text: string }> = {
@@ -62,6 +68,13 @@ export function SearchPage() {
   const searchRef = useRef<HTMLDivElement>(null)
   const debouncedQuery = useDebounce(query, 250)
 
+  // Action card state
+  const [cardLoading, setCardLoading] = useState(true)
+  const [cardError, setCardError] = useState(false)
+  const [aprobadas, setAprobadas]   = useState<CardData | null>(null)
+  const [pendientes, setPendientes] = useState<CardData | null>(null)
+  const [vencidas, setVencidas]     = useState<CardData | null>(null)
+
   // Top 20 state
   const [topSuppliers, setTopSuppliers] = useState<TopSupplierRow[]>([])
   const [assessments, setAssessments] = useState<Map<string, boolean | null>>(new Map())
@@ -104,83 +117,145 @@ export function SearchPage() {
     return () => document.removeEventListener('mousedown', handler)
   }, [])
 
-  /* ── Top 20 by spend (2025) ───────────────────────────── */
+  /* ── Action cards — fetch all CPP rows once, derive three metrics ── */
+  const fetchCards = useCallback(async () => {
+    setCardLoading(true)
+    setCardError(false)
+
+    type CppRow = { importe_cop: string | number; aprobado: string | null; fecha_vencimiento: string | null }
+
+    const PAGE = 1000
+    const allCpp: CppRow[] = []
+    for (let from = 0; ; from += PAGE) {
+      const { data, error } = await supabase
+        .from('cuentas_por_pagar_cache')
+        .select('importe_cop, aprobado, fecha_vencimiento')
+        .range(from, from + PAGE - 1)
+      if (error) { setCardError(true); setCardLoading(false); return }
+      if (!data || data.length === 0) break
+      allCpp.push(...(data as unknown as CppRow[]))
+      if (data.length < PAGE) break
+    }
+
+    const today = new Date().toISOString().slice(0, 10)
+
+    const sumRows = (rows: CppRow[]): CardData => ({
+      count: rows.length,
+      total: rows.reduce((s, r) => s + Number(r.importe_cop ?? 0), 0),
+    })
+
+    setAprobadas(sumRows(allCpp.filter(r => r.aprobado?.toUpperCase() === 'SI')))
+    setPendientes(sumRows(allCpp.filter(r => r.aprobado?.toUpperCase() !== 'SI')))
+    setVencidas(sumRows(allCpp.filter(r => r.fecha_vencimiento && r.fecha_vencimiento < today)))
+
+    setCardLoading(false)
+  }, [])
+
+  useEffect(() => { void fetchCards() }, [fetchCards])
+
+  /* ── Top 20 by spend · last 60 days · grouped by NIT ─────────────── */
   const fetchTop20 = useCallback(async () => {
     setLoadingTop(true)
     setTopError(false)
 
-    // Query 1 — totals: all 2025 monthly rows, group in JS by supplier_id
-    const { data, error } = await supabase
-      .from('suppliers_spend_monthly')
-      .select('supplier_id, amount_cop, accounts_suppliers!inner(id, name, razon_social)')
-      .eq('year', 2025)
-      .not('accounts_suppliers.name', 'ilike', 'X -%')
+    const cutoff = new Date()
+    cutoff.setDate(cutoff.getDate() - 60)
+    const cutoffStr = cutoff.toISOString().slice(0, 10)
 
-    if (error || !data) {
-      setTopError(true)
+    type TxRow = {
+      nit: string | null
+      importe_cop: string | number
+      empresa: string | null
+      empresa_split: Array<{ code: string; pct: number; importe_cop_allocated: number }> | null
+    }
+
+    const allTx: TxRow[] = []
+    const PAGE = 1000
+    for (let from = 0; ; from += PAGE) {
+      const { data, error } = await supabase
+        .from('transactions_cache')
+        .select('nit, importe_cop, empresa, empresa_split')
+        .gte('fecha_factura', cutoffStr)
+        .not('nit', 'is', null)
+        .range(from, from + PAGE - 1)
+      if (error) { setTopError(true); setLoadingTop(false); return }
+      if (!data || data.length === 0) break
+      allTx.push(...(data as unknown as TxRow[]))
+      if (data.length < PAGE) break
+    }
+
+    // Group by NIT: sum importe_cop, track per-entity allocated totals
+    const grouped = new Map<string, { total: number; entityTotals: Map<string, number> }>()
+    for (const r of allTx) {
+      if (!r.nit) continue
+      const amount = Number(r.importe_cop ?? 0)
+      if (!amount) continue
+
+      const g = grouped.get(r.nit) ?? { total: 0, entityTotals: new Map() }
+      g.total += amount
+
+      if (r.empresa) {
+        g.entityTotals.set(r.empresa, (g.entityTotals.get(r.empresa) ?? 0) + amount)
+      } else if (r.empresa_split && Array.isArray(r.empresa_split)) {
+        for (const s of r.empresa_split) {
+          const alloc = Number(s.importe_cop_allocated) || amount * s.pct
+          g.entityTotals.set(s.code, (g.entityTotals.get(s.code) ?? 0) + alloc)
+        }
+      }
+
+      grouped.set(r.nit, g)
+    }
+
+    const top20nits = Array.from(grouped.entries())
+      .sort((a, b) => b[1].total - a[1].total)
+      .slice(0, 20)
+      .map(([nit]) => nit)
+
+    if (top20nits.length === 0) {
+      setTopSuppliers([])
       setLoadingTop(false)
       return
     }
 
-    type SpendRow = {
-      supplier_id: string
-      amount_cop: number
-      accounts_suppliers: { id: string; name: string; razon_social: string | null } | { id: string; name: string; razon_social: string | null }[]
-    }
+    // Fetch supplier records by NIT
+    const { data: suppData } = await supabase
+      .from('accounts_suppliers')
+      .select('id, name, razon_social, nit')
+      .in('nit', top20nits)
 
-    const grouped = new Map<string, TopSupplierRow>()
-    for (const r of data as unknown as SpendRow[]) {
-      const s = Array.isArray(r.accounts_suppliers) ? r.accounts_suppliers[0] : r.accounts_suppliers
-      const existing = grouped.get(r.supplier_id)
-      if (existing) {
-        existing.gasto_2025 += r.amount_cop
-      } else {
-        grouped.set(r.supplier_id, { id: s.id, nombre: s.razon_social || s.name, gasto_2025: r.amount_cop, entities: [] })
+    const nitToSupplier = new Map(
+      ((suppData ?? []) as { id: string; name: string; razon_social: string | null; nit: string }[])
+        .map(s => [s.nit, s])
+    )
+
+    const rows: TopSupplierRow[] = top20nits.map(nit => {
+      const data = grouped.get(nit)!
+      const supplier = nitToSupplier.get(nit)
+      return {
+        id: supplier?.id ?? '',
+        nombre: supplier ? (supplier.razon_social || supplier.name) : nit,
+        nit,
+        gasto: data.total,
+        entities: Array.from(data.entityTotals.entries())
+          .map(([entity, amount_cop]) => ({ entity, amount_cop }))
+          .sort((a, b) => b.amount_cop - a.amount_cop),
       }
-    }
-    const rows = Array.from(grouped.values())
-      .sort((a, b) => b.gasto_2025 - a.gasto_2025)
-      .slice(0, 20)
-
-    // Query 2 — entity breakdown for the top 20 supplier IDs
-    const top20ids = rows.map(r => r.id)
-    if (top20ids.length > 0) {
-      type EntityRow = { supplier_id: string; entity: string; amount_cop: number }
-      const { data: eData } = await supabase
-        .from('suppliers_spend_monthly')
-        .select('supplier_id, entity, amount_cop')
-        .eq('year', 2025)
-        .in('supplier_id', top20ids)
-
-      if (eData) {
-        // Group by supplier_id → entity, summing monthly amounts
-        const entityMap = new Map<string, Map<string, number>>()
-        for (const e of eData as EntityRow[]) {
-          const byEntity = entityMap.get(e.supplier_id) ?? new Map<string, number>()
-          byEntity.set(e.entity, (byEntity.get(e.entity) ?? 0) + e.amount_cop)
-          entityMap.set(e.supplier_id, byEntity)
-        }
-        for (const row of rows) {
-          const byEntity = entityMap.get(row.id)
-          row.entities = byEntity
-            ? Array.from(byEntity.entries()).map(([entity, amount_cop]) => ({ entity, amount_cop }))
-            : []
-        }
-      }
-    }
+    })
 
     setTopSuppliers(rows)
 
-    // Assessments for top 20
-    if (top20ids.length > 0) {
+    // Assessments for matched suppliers
+    const ids = rows.map(r => r.id).filter(Boolean)
+    if (ids.length > 0) {
       const { data: aData } = await supabase
         .from('suppliers_assessment')
         .select('supplier_id, pass')
-        .in('supplier_id', top20ids)
+        .in('supplier_id', ids)
       const map = new Map<string, boolean | null>()
       ;(aData as Assessment[] ?? []).forEach(a => map.set(a.supplier_id, a.pass))
       setAssessments(map)
     }
+
     setLoadingTop(false)
   }, [])
 
@@ -306,32 +381,40 @@ export function SearchPage() {
 
       {/* ── Section 2: Action cards ──────────────────────── */}
       <section>
-        <div style={{
-          display: 'grid',
-          gridTemplateColumns: 'repeat(3, 1fr)',
-          gap: 16,
-        }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 16 }}>
           <ActionCard
             icon={<CheckCircledIcon width={20} height={20} />}
             title="Facturas Aprobadas"
             accent="var(--hh-teal)"
+            amountColor="var(--hh-teal)"
+            loading={cardLoading}
+            error={cardError}
+            data={aprobadas}
           />
           <ActionCard
             icon={<ClockIcon width={20} height={20} />}
             title="Facturas Pendiente Aprobación"
             accent="var(--hh-lemon)"
+            amountColor="var(--hh-teal)"
+            loading={cardLoading}
+            error={cardError}
+            data={pendientes}
           />
           <ActionCard
             icon={<ExclamationTriangleIcon width={20} height={20} />}
             title="Cartera Vencida — Facturas por Pagar Urgente"
             accent="var(--hh-mango)"
+            amountColor="var(--hh-mango)"
+            loading={cardLoading}
+            error={cardError}
+            data={vencidas}
           />
         </div>
       </section>
 
       {/* ── Section 3: Top 20 ───────────────────────────── */}
       <section>
-        <h2 style={sectionHeadingStyle}>Top 20 · Gasto 2025</h2>
+        <h2 style={sectionHeadingStyle}>Top 20 · Últimos 60 días</h2>
 
         <div style={tableCardStyle}>
           <table style={{ width: '100%', borderCollapse: 'collapse' }}>
@@ -340,7 +423,7 @@ export function SearchPage() {
                 <Th align="left">Nombre</Th>
                 <Th align="left">Entidades</Th>
                 <Th align="left">Evaluación</Th>
-                <Th align="right">Gasto 2025</Th>
+                <Th align="right">Gasto 60d</Th>
                 <Th align="right">Pendiente</Th>
                 <Th align="left">Zona de proveedor</Th>
               </tr>
@@ -362,7 +445,7 @@ export function SearchPage() {
                 <tr>
                   <td colSpan={6} style={{ padding: '48px 16px', textAlign: 'center' }}>
                     <span style={{ fontFamily: 'var(--font-display)', fontWeight: 300, fontStyle: 'italic', fontSize: '1rem', color: 'var(--hh-haze)' }}>
-                      Sin datos de gasto para 2024.
+                      Sin datos de gasto en los últimos 60 días.
                     </span>
                   </td>
                 </tr>
@@ -371,67 +454,74 @@ export function SearchPage() {
                   const assessment = assessments.has(row.id) ? assessments.get(row.id) : undefined
                   return (
                     <tr
-                      key={row.id}
+                      key={row.nit}
                       style={{ background: idx % 2 === 1 ? 'var(--hh-ice)' : 'var(--hh-white)' }}
                     >
                       <td style={tdStyle}>
-                        <button
-                          onClick={() => navigate(`/suppliers/${row.id}`)}
-                          style={{
-                            background: 'none',
-                            border: 'none',
-                            padding: 0,
-                            fontFamily: 'var(--font-body)',
-                            fontWeight: 400,
-                            fontSize: '0.875rem',
-                            color: 'var(--hh-dark)',
-                            cursor: 'pointer',
-                            textAlign: 'left',
-                            textDecoration: 'underline',
-                            textDecorationColor: 'rgba(122,145,165,0.4)',
-                            textUnderlineOffset: 3,
-                          }}
-                          onMouseEnter={e => { e.currentTarget.style.color = 'var(--hh-teal)' }}
-                          onMouseLeave={e => { e.currentTarget.style.color = 'var(--hh-dark)' }}
-                        >
-                          {row.nombre}
-                        </button>
+                        {row.id ? (
+                          <button
+                            onClick={() => navigate(`/suppliers/${row.id}`)}
+                            style={{
+                              background: 'none',
+                              border: 'none',
+                              padding: 0,
+                              fontFamily: 'var(--font-body)',
+                              fontWeight: 400,
+                              fontSize: '0.875rem',
+                              color: 'var(--hh-dark)',
+                              cursor: 'pointer',
+                              textAlign: 'left',
+                              textDecoration: 'underline',
+                              textDecorationColor: 'rgba(122,145,165,0.4)',
+                              textUnderlineOffset: 3,
+                            }}
+                            onMouseEnter={e => { e.currentTarget.style.color = 'var(--hh-teal)' }}
+                            onMouseLeave={e => { e.currentTarget.style.color = 'var(--hh-dark)' }}
+                          >
+                            {row.nombre}
+                          </button>
+                        ) : (
+                          <span style={{ fontFamily: 'var(--font-body)', fontSize: '0.875rem', color: 'var(--hh-dark)' }}>
+                            {row.nombre}
+                          </span>
+                        )}
                       </td>
                       <td style={tdStyle}>
                         <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
-                          {row.entities
-                            .filter(e => e.amount_cop > 0)
-                            .sort((a, b) => b.amount_cop - a.amount_cop)
-                            .map(e => (
-                              <EntityPill key={e.entity} entity={e.entity} amount={e.amount_cop} />
-                            ))}
+                          {row.entities.map(e => (
+                            <EntityPill key={e.entity} entity={e.entity} amount={e.amount_cop} />
+                          ))}
                         </div>
                       </td>
                       <td style={tdStyle}>
                         <AssessmentBadge pass={assessment} />
                       </td>
                       <td style={{ ...tdStyle, textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>
-                        {formatCOP(row.gasto_2025)}
+                        {formatCOP(row.gasto)}
                       </td>
                       <td style={{ ...tdStyle, textAlign: 'right', color: 'var(--hh-haze)' }}>—</td>
                       <td style={tdStyle}>
-                        <button
-                          onClick={() => navigate(`/suppliers/${row.id}`)}
-                          style={{
-                            background: 'rgba(74,155,142,0.1)',
-                            border: '1px solid rgba(74,155,142,0.3)',
-                            color: 'var(--hh-teal)',
-                            fontFamily: 'var(--font-body)',
-                            fontWeight: 500,
-                            fontSize: '0.75rem',
-                            padding: '4px 10px',
-                            borderRadius: 4,
-                            cursor: 'pointer',
-                            whiteSpace: 'nowrap',
-                          }}
-                        >
-                          Acceder →
-                        </button>
+                        {row.id ? (
+                          <button
+                            onClick={() => navigate(`/suppliers/${row.id}`)}
+                            style={{
+                              background: 'rgba(74,155,142,0.1)',
+                              border: '1px solid rgba(74,155,142,0.3)',
+                              color: 'var(--hh-teal)',
+                              fontFamily: 'var(--font-body)',
+                              fontWeight: 500,
+                              fontSize: '0.75rem',
+                              padding: '4px 10px',
+                              borderRadius: 4,
+                              cursor: 'pointer',
+                              whiteSpace: 'nowrap',
+                            }}
+                          >
+                            Acceder →
+                          </button>
+                        ) : (
+                          <span style={{ fontSize: '0.75rem', color: 'var(--hh-haze)' }}>Sin perfil</span>
+                        )}
                       </td>
                     </tr>
                   )
@@ -495,14 +585,30 @@ function EntityPill({ entity, amount }: { entity: string; amount: number }) {
   )
 }
 
+const shimmerStyle: React.CSSProperties = {
+  display: 'inline-block',
+  background: 'linear-gradient(90deg, rgba(122,145,165,0.1) 25%, rgba(122,145,165,0.2) 50%, rgba(122,145,165,0.1) 75%)',
+  backgroundSize: '200% 100%',
+  animation: 'shimmer 1.4s infinite',
+  borderRadius: 4,
+}
+
 function ActionCard({
   icon,
   title,
   accent,
+  amountColor,
+  loading,
+  error,
+  data,
 }: {
   icon: React.ReactNode
   title: string
   accent: string
+  amountColor: string
+  loading: boolean
+  error: boolean
+  data: CardData | null
 }) {
   return (
     <div
@@ -529,15 +635,26 @@ function ActionCard({
           {title}
         </span>
       </div>
-      <p style={{
-        fontFamily: 'var(--font-body)',
-        fontWeight: 300,
-        fontSize: '0.8125rem',
-        color: 'var(--hh-haze)',
-        margin: 0,
-      }}>
-        Próximamente
-      </p>
+
+      {loading ? (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+          <span style={{ ...shimmerStyle, height: 13, width: 80 }} />
+          <span style={{ ...shimmerStyle, height: 18, width: 130 }} />
+        </div>
+      ) : error || !data ? (
+        <p style={{ fontFamily: 'var(--font-body)', fontWeight: 300, fontSize: '0.8125rem', color: 'var(--hh-haze)', margin: 0 }}>
+          Error al cargar
+        </p>
+      ) : (
+        <div>
+          <p style={{ fontFamily: 'var(--font-body)', fontWeight: 400, fontSize: '0.8125rem', color: 'var(--hh-haze)', margin: '0 0 2px' }}>
+            {data.count} {data.count === 1 ? 'factura' : 'facturas'}
+          </p>
+          <p style={{ fontFamily: 'var(--font-body)', fontWeight: 600, fontSize: '1rem', color: amountColor, margin: 0, fontVariantNumeric: 'tabular-nums' }}>
+            {formatCOP(data.total)}
+          </p>
+        </div>
+      )}
     </div>
   )
 }
@@ -564,13 +681,8 @@ function AssessmentBadge({ pass }: { pass: boolean | null | undefined }) {
   if (pass === true) {
     return (
       <span style={{
-        display: 'inline-block',
-        padding: '2px 10px',
-        borderRadius: 99,
-        background: 'rgba(101,141,94,0.12)',
-        color: '#4a8044',
-        fontSize: '0.75rem',
-        fontWeight: 500,
+        display: 'inline-block', padding: '2px 10px', borderRadius: 99,
+        background: 'rgba(101,141,94,0.12)', color: '#4a8044', fontSize: '0.75rem', fontWeight: 500,
       }}>
         Aprobado
       </span>
@@ -579,13 +691,8 @@ function AssessmentBadge({ pass }: { pass: boolean | null | undefined }) {
   if (pass === false) {
     return (
       <span style={{
-        display: 'inline-block',
-        padding: '2px 10px',
-        borderRadius: 99,
-        background: 'rgba(252,0,131,0.08)',
-        color: 'var(--hh-mango)',
-        fontSize: '0.75rem',
-        fontWeight: 500,
+        display: 'inline-block', padding: '2px 10px', borderRadius: 99,
+        background: 'rgba(252,0,131,0.08)', color: 'var(--hh-mango)', fontSize: '0.75rem', fontWeight: 500,
       }}>
         No aprobado
       </span>
@@ -593,13 +700,8 @@ function AssessmentBadge({ pass }: { pass: boolean | null | undefined }) {
   }
   return (
     <span style={{
-      display: 'inline-block',
-      padding: '2px 10px',
-      borderRadius: 99,
-      background: 'rgba(122,145,165,0.12)',
-      color: 'var(--hh-haze)',
-      fontSize: '0.75rem',
-      fontWeight: 400,
+      display: 'inline-block', padding: '2px 10px', borderRadius: 99,
+      background: 'rgba(122,145,165,0.12)', color: 'var(--hh-haze)', fontSize: '0.75rem', fontWeight: 400,
     }}>
       Pendiente
     </span>
