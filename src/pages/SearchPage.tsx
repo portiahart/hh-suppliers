@@ -5,6 +5,7 @@ import {
   CheckCircledIcon,
   ClockIcon,
   ExclamationTriangleIcon,
+  Cross2Icon,
 } from '@radix-ui/react-icons'
 import { supabase, suppliersQuery } from '../lib/supabase'
 import type { Supplier } from '../types/supplier'
@@ -19,9 +20,21 @@ interface TopSupplierRow {
   entities: Array<{ entity: string; amount_cop: number }>
 }
 
+interface CppInvoice {
+  importe_cop: string | number
+  aprobado: string | null
+  fecha_vencimiento: string | null
+  proveedor: string | null
+  empresa: string | null
+  empresa_split: Array<{ code: string; pct: number }> | null
+  concepto: string | null
+  centro_costo: string | null
+}
+
 interface CardData {
   count: number
   total: number
+  rows: CppInvoice[]
 }
 
 const ENTITY_COLORS: Record<string, { bg: string; text: string }> = {
@@ -74,6 +87,7 @@ export function SearchPage() {
   const [aprobadas, setAprobadas]   = useState<CardData | null>(null)
   const [pendientes, setPendientes] = useState<CardData | null>(null)
   const [vencidas, setVencidas]     = useState<CardData | null>(null)
+  const [modalData, setModalData]   = useState<{ title: string; rows: CppInvoice[] } | null>(null)
 
   // Top 20 state
   const [topSuppliers, setTopSuppliers] = useState<TopSupplierRow[]>([])
@@ -122,26 +136,25 @@ export function SearchPage() {
     setCardLoading(true)
     setCardError(false)
 
-    type CppRow = { importe_cop: string | number; aprobado: string | null; fecha_vencimiento: string | null }
-
     const PAGE = 1000
-    const allCpp: CppRow[] = []
+    const allCpp: CppInvoice[] = []
     for (let from = 0; ; from += PAGE) {
       const { data, error } = await supabase
         .from('cuentas_por_pagar_cache')
-        .select('importe_cop, aprobado, fecha_vencimiento')
+        .select('importe_cop, aprobado, fecha_vencimiento, proveedor, empresa, empresa_split, concepto, centro_costo')
         .range(from, from + PAGE - 1)
       if (error) { setCardError(true); setCardLoading(false); return }
       if (!data || data.length === 0) break
-      allCpp.push(...(data as unknown as CppRow[]))
+      allCpp.push(...(data as unknown as CppInvoice[]))
       if (data.length < PAGE) break
     }
 
     const today = new Date().toISOString().slice(0, 10)
 
-    const sumRows = (rows: CppRow[]): CardData => ({
+    const sumRows = (rows: CppInvoice[]): CardData => ({
       count: rows.length,
       total: rows.reduce((s, r) => s + Number(r.importe_cop ?? 0), 0),
+      rows,
     })
 
     setAprobadas(sumRows(allCpp.filter(r => r.aprobado?.toUpperCase() === 'SI')))
@@ -390,6 +403,7 @@ export function SearchPage() {
             loading={cardLoading}
             error={cardError}
             data={aprobadas}
+            onAmountClick={() => aprobadas && setModalData({ title: 'Facturas Aprobadas', rows: aprobadas.rows })}
           />
           <ActionCard
             icon={<ClockIcon width={20} height={20} />}
@@ -399,6 +413,7 @@ export function SearchPage() {
             loading={cardLoading}
             error={cardError}
             data={pendientes}
+            onAmountClick={() => pendientes && setModalData({ title: 'Facturas Pendiente Aprobación', rows: pendientes.rows })}
           />
           <ActionCard
             icon={<ExclamationTriangleIcon width={20} height={20} />}
@@ -408,9 +423,19 @@ export function SearchPage() {
             loading={cardLoading}
             error={cardError}
             data={vencidas}
+            onAmountClick={() => vencidas && setModalData({ title: 'Cartera Vencida', rows: vencidas.rows })}
           />
         </div>
       </section>
+
+      {/* ── Invoice modal ────────────────────────────────── */}
+      {modalData && (
+        <InvoiceModal
+          title={modalData.title}
+          rows={modalData.rows}
+          onClose={() => setModalData(null)}
+        />
+      )}
 
       {/* ── Section 3: Top 20 ───────────────────────────── */}
       <section>
@@ -601,6 +626,7 @@ function ActionCard({
   loading,
   error,
   data,
+  onAmountClick,
 }: {
   icon: React.ReactNode
   title: string
@@ -609,6 +635,7 @@ function ActionCard({
   loading: boolean
   error: boolean
   data: CardData | null
+  onAmountClick?: () => void
 }) {
   return (
     <div
@@ -650,9 +677,26 @@ function ActionCard({
           <p style={{ fontFamily: 'var(--font-body)', fontWeight: 400, fontSize: '0.8125rem', color: 'var(--hh-haze)', margin: '0 0 2px' }}>
             {data.count} {data.count === 1 ? 'factura' : 'facturas'}
           </p>
-          <p style={{ fontFamily: 'var(--font-body)', fontWeight: 600, fontSize: '1rem', color: amountColor, margin: 0, fontVariantNumeric: 'tabular-nums' }}>
+          <button
+            onClick={onAmountClick}
+            style={{
+              background: 'none',
+              border: 'none',
+              padding: 0,
+              margin: 0,
+              fontFamily: 'var(--font-body)',
+              fontWeight: 600,
+              fontSize: '1rem',
+              color: amountColor,
+              fontVariantNumeric: 'tabular-nums',
+              cursor: onAmountClick ? 'pointer' : 'default',
+              textDecoration: onAmountClick ? 'underline' : 'none',
+              textUnderlineOffset: 3,
+              textDecorationColor: `${amountColor}55`,
+            }}
+          >
             {formatCOP(data.total)}
-          </p>
+          </button>
         </div>
       )}
     </div>
@@ -726,6 +770,153 @@ function SkeletonRow({ cols, even }: { cols: number; even: boolean }) {
         </td>
       ))}
     </tr>
+  )
+}
+
+/* ─── Invoice Modal ──────────────────────────────────────── */
+
+function InvoiceModal({ title, rows, onClose }: { title: string; rows: CppInvoice[]; onClose: () => void }) {
+  // Close on backdrop click
+  const backdropRef = useRef<HTMLDivElement>(null)
+
+  // Close on Escape
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose() }
+    document.addEventListener('keydown', handler)
+    return () => document.removeEventListener('keydown', handler)
+  }, [onClose])
+
+  const sorted = [...rows].sort((a, b) => {
+    const da = a.fecha_vencimiento ?? ''
+    const db = b.fecha_vencimiento ?? ''
+    return da < db ? -1 : da > db ? 1 : 0
+  })
+
+  function companyBadges(row: CppInvoice) {
+    if (row.empresa_split && Array.isArray(row.empresa_split) && row.empresa_split.length > 0) {
+      return row.empresa_split.map(s => s.code)
+    }
+    return row.empresa ? [row.empresa] : []
+  }
+
+  return (
+    <div
+      ref={backdropRef}
+      onClick={e => { if (e.target === backdropRef.current) onClose() }}
+      style={{
+        position: 'fixed', inset: 0,
+        background: 'rgba(15,25,40,0.55)',
+        zIndex: 200,
+        display: 'flex',
+        alignItems: 'flex-start',
+        justifyContent: 'center',
+        padding: '48px 24px',
+        overflowY: 'auto',
+      }}
+    >
+      <div style={{
+        background: 'var(--hh-white)',
+        borderRadius: 10,
+        width: '100%',
+        maxWidth: 860,
+        boxShadow: '0 16px 48px rgba(0,0,0,0.22)',
+        display: 'flex',
+        flexDirection: 'column',
+        maxHeight: 'calc(100vh - 96px)',
+      }}>
+        {/* Header */}
+        <div style={{
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+          padding: '20px 24px 16px',
+          borderBottom: '1px solid rgba(122,145,165,0.15)',
+          flexShrink: 0,
+        }}>
+          <div>
+            <h2 style={{ fontFamily: 'var(--font-display)', fontWeight: 300, fontSize: '1.0625rem', color: 'var(--hh-dark)', margin: 0 }}>
+              {title}
+            </h2>
+            <p style={{ fontFamily: 'var(--font-body)', fontWeight: 300, fontSize: '0.8125rem', color: 'var(--hh-haze)', margin: '3px 0 0' }}>
+              {rows.length} {rows.length === 1 ? 'factura' : 'facturas'}
+            </p>
+          </div>
+          <button
+            onClick={onClose}
+            style={{
+              background: 'none', border: 'none', cursor: 'pointer',
+              color: 'var(--hh-haze)', padding: 4, borderRadius: 4,
+              display: 'flex', alignItems: 'center',
+            }}
+            onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.color = 'var(--hh-dark)' }}
+            onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.color = 'var(--hh-haze)' }}
+          >
+            <Cross2Icon width={18} height={18} />
+          </button>
+        </div>
+
+        {/* Table */}
+        <div style={{ overflowY: 'auto', flexGrow: 1 }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+            <thead style={{ position: 'sticky', top: 0, background: 'var(--hh-white)', zIndex: 1 }}>
+              <tr style={{ borderBottom: '1px solid rgba(122,145,165,0.2)' }}>
+                <Th align="left">Proveedor</Th>
+                <Th align="left">Empresa</Th>
+                <Th align="left">Concepto</Th>
+                <Th align="left">Centro de costo</Th>
+                <Th align="right">Vencimiento</Th>
+                <Th align="right">Importe</Th>
+              </tr>
+            </thead>
+            <tbody>
+              {sorted.map((row, idx) => {
+                const badges = companyBadges(row)
+                return (
+                  <tr key={idx} style={{ background: idx % 2 === 1 ? 'var(--hh-ice)' : 'var(--hh-white)' }}>
+                    <td style={tdStyle}>{row.proveedor ?? '—'}</td>
+                    <td style={tdStyle}>
+                      <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+                        {badges.length > 0
+                          ? badges.map(code => <CompactPill key={code} code={code} />)
+                          : <span style={{ color: 'var(--hh-haze)', fontSize: '0.8125rem' }}>—</span>
+                        }
+                      </div>
+                    </td>
+                    <td style={{ ...tdStyle, maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      {row.concepto ?? '—'}
+                    </td>
+                    <td style={tdStyle}>{row.centro_costo ?? '—'}</td>
+                    <td style={{ ...tdStyle, textAlign: 'right', whiteSpace: 'nowrap', fontVariantNumeric: 'tabular-nums' }}>
+                      {row.fecha_vencimiento ?? '—'}
+                    </td>
+                    <td style={{ ...tdStyle, textAlign: 'right', fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' }}>
+                      {formatCOP(Number(row.importe_cop ?? 0))}
+                    </td>
+                  </tr>
+                )
+              })}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function CompactPill({ code }: { code: string }) {
+  const upper = code.toUpperCase()
+  const color = ENTITY_COLORS[upper] ?? { bg: 'var(--hh-haze)', text: '#fff' }
+  return (
+    <span style={{
+      display: 'inline-block',
+      padding: '2px 7px',
+      borderRadius: 99,
+      background: color.bg,
+      color: color.text,
+      fontSize: '0.6875rem',
+      fontWeight: 500,
+      letterSpacing: '0.05em',
+    }}>
+      {upper}
+    </span>
   )
 }
 
