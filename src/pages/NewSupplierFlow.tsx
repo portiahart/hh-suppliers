@@ -35,12 +35,11 @@ export function NewSupplierFlow() {
   const checkNit = async () => {
     if (!nit.trim()) return
     setNitState('checking')
-    const { data } = await suppliersQuery()
-      .select('id')
+    const { data } = await suppliersQuery('id')
       .eq('nit', nit.trim())
       .maybeSingle()
     if (data) {
-      setExistingId((data as { id: string }).id)
+      setExistingId((data as unknown as { id: string }).id)
       setNitState('taken')
     } else {
       setExistingId(null)

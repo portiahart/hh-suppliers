@@ -14,7 +14,7 @@ import type { Supplier } from '../types/supplier'
 interface TopSupplierRow {
   id: string
   nombre: string
-  gasto_2024: number
+  gasto_2025: number
   entities: Array<{ entity: string; amount_cop: number }>
 }
 
@@ -77,11 +77,10 @@ export function SearchPage() {
     }
     setSearching(true)
     void (async () => {
-      const { data } = await suppliersQuery()
-        .select('id, name, razon_social, nit')
+      const { data } = await suppliersQuery('id, name, razon_social, nit')
         .or(`name.ilike.%${debouncedQuery}%,razon_social.ilike.%${debouncedQuery}%,nit.ilike.%${debouncedQuery}%`)
         .limit(8)
-      setSuggestions((data as Supplier[]) ?? [])
+      setSuggestions((data as unknown as Supplier[]) ?? [])
       setShowDropdown(true)
       setSearching(false)
     })()
@@ -98,16 +97,16 @@ export function SearchPage() {
     return () => document.removeEventListener('mousedown', handler)
   }, [])
 
-  /* ── Top 20 by spend (2024) ───────────────────────────── */
+  /* ── Top 20 by spend (2025) ───────────────────────────── */
   const fetchTop20 = useCallback(async () => {
     setLoadingTop(true)
     setTopError(false)
 
-    // Query 1 — totals: all 2024 rows, no limit, group in JS by supplier_id
+    // Query 1 — totals: all 2025 monthly rows, group in JS by supplier_id
     const { data, error } = await supabase
-      .from('suppliers_spend')
+      .from('suppliers_spend_monthly')
       .select('supplier_id, amount_cop, accounts_suppliers!inner(id, name, razon_social)')
-      .eq('year', 2024)
+      .eq('year', 2025)
       .not('accounts_suppliers.name', 'ilike', 'X -%')
 
     if (error || !data) {
@@ -127,13 +126,13 @@ export function SearchPage() {
       const s = Array.isArray(r.accounts_suppliers) ? r.accounts_suppliers[0] : r.accounts_suppliers
       const existing = grouped.get(r.supplier_id)
       if (existing) {
-        existing.gasto_2024 += r.amount_cop
+        existing.gasto_2025 += r.amount_cop
       } else {
-        grouped.set(r.supplier_id, { id: s.id, nombre: s.razon_social || s.name, gasto_2024: r.amount_cop, entities: [] })
+        grouped.set(r.supplier_id, { id: s.id, nombre: s.razon_social || s.name, gasto_2025: r.amount_cop, entities: [] })
       }
     }
     const rows = Array.from(grouped.values())
-      .sort((a, b) => b.gasto_2024 - a.gasto_2024)
+      .sort((a, b) => b.gasto_2025 - a.gasto_2025)
       .slice(0, 20)
 
     // Query 2 — entity breakdown for the top 20 supplier IDs
@@ -141,9 +140,9 @@ export function SearchPage() {
     if (top20ids.length > 0) {
       type EntityRow = { supplier_id: string; entity: string; amount_cop: number }
       const { data: eData } = await supabase
-        .from('suppliers_spend')
+        .from('suppliers_spend_monthly')
         .select('supplier_id, entity, amount_cop')
-        .eq('year', 2024)
+        .eq('year', 2025)
         .in('supplier_id', top20ids)
 
       if (eData) {
@@ -201,7 +200,7 @@ export function SearchPage() {
           <input
             type="text"
             value={query}
-            onChange={e => { setQuery(e.target.value); setShowDropdown(false) }}
+            onChange={e => setQuery(e.target.value)}
             onFocus={() => { if (suggestions.length) setShowDropdown(true) }}
             placeholder="Buscar proveedor por nombre o NIT…"
             style={{
@@ -319,7 +318,7 @@ export function SearchPage() {
 
       {/* ── Section 3: Top 20 ───────────────────────────── */}
       <section>
-        <h2 style={sectionHeadingStyle}>Top 20 · Gasto 2024</h2>
+        <h2 style={sectionHeadingStyle}>Top 20 · Gasto 2025</h2>
 
         <div style={tableCardStyle}>
           <table style={{ width: '100%', borderCollapse: 'collapse' }}>
@@ -328,7 +327,7 @@ export function SearchPage() {
                 <Th align="left">Nombre</Th>
                 <Th align="left">Entidades</Th>
                 <Th align="left">Evaluación</Th>
-                <Th align="right">Gasto 2024</Th>
+                <Th align="right">Gasto 2025</Th>
                 <Th align="right">Pendiente</Th>
                 <Th align="left">Zona de proveedor</Th>
               </tr>
@@ -399,7 +398,7 @@ export function SearchPage() {
                         <AssessmentBadge pass={assessment} />
                       </td>
                       <td style={{ ...tdStyle, textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>
-                        {formatCOP(row.gasto_2024)}
+                        {formatCOP(row.gasto_2025)}
                       </td>
                       <td style={{ ...tdStyle, textAlign: 'right', color: 'var(--hh-haze)' }}>—</td>
                       <td style={tdStyle}>

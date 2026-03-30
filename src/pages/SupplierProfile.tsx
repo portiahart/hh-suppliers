@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { ArrowLeftIcon, Pencil1Icon } from '@radix-ui/react-icons'
-import { supabase, suppliersQuery } from '../lib/supabase'
+import { supabase } from '../lib/supabase'
 import type { Supplier } from '../types/supplier'
 
 const TABS = ['Resumen', 'Legal', 'Bancario', 'Documentos', 'Evaluación', 'B Corp', 'Gasto'] as const
@@ -17,8 +17,9 @@ export function SupplierProfile() {
   useEffect(() => {
     if (!id) return
     void (async () => {
-      const { data, error } = await suppliersQuery()
-        .select('*')
+      const { data, error } = await supabase
+        .from('accounts_suppliers')
+        .select('id, name, razon_social, nombre_operativo, nit, documento_tipo, tipo_persona, email, telefono, categoria, status, created_at, updated_at')
         .eq('id', id)
         .single()
       if (!error) setSupplier(data as Supplier)
@@ -362,8 +363,8 @@ function formatCOPFull(n: number): string {
 }
 
 function formatCOPShort(n: number): string {
-  if (n >= 1_000_000_000) return '$' + (n / 1_000_000_000).toFixed(1) + 'B'
-  if (n >= 1_000_000)     return '$' + (n / 1_000_000).toFixed(1) + 'M'
+  if (n >= 1_000_000_000) return '$' + Math.round(n / 1_000_000_000) + 'B'
+  if (n >= 1_000_000)     return '$' + Math.round(n / 1_000_000) + 'M'
   return '$' + Math.round(n).toLocaleString('es-CO')
 }
 

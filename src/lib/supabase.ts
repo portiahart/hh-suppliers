@@ -7,8 +7,9 @@ export const supabase = createClient(supabaseUrl, supabaseAnonKey)
 
 // Pre-filtered query builder for accounts_suppliers.
 // Excludes internal staff entries whose name starts with "X -".
-export function suppliersQuery() {
+export function suppliersQuery(select = '*') {
   return supabase
     .from('accounts_suppliers')
+    .select(select)
     .not('name', 'ilike', 'X -%')
 }
