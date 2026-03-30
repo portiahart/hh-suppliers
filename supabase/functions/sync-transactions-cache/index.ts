@@ -396,7 +396,7 @@ function buildRecord(
     fecha_factura:     parseSheetDate(cellRaw(row, colMap.fechaFactura)),
     fecha_vencimiento: parseSheetDate(cellRaw(row, colMap.fechaVencimiento)),
     proveedor:         proveedor || null,
-    nit:               cell(row, colMap.nit) || null,
+    nit:               (() => { const v = cell(row, colMap.nit); return (v && /^\d/.test(v)) ? v : null })(),
     importe_cop:       importeCop || null,
     monto_base:        parseNumber(cellRaw(row, colMap.montoBase)) || null,
     total_iva:         parseNumber(cellRaw(row, colMap.totalIva)) || null,
