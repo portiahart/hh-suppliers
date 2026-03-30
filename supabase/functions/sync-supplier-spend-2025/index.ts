@@ -165,6 +165,17 @@ Deno.serve(async (req: Request) => {
       ...ENTITY_RANGES.map(e => fetchNamedRange(e.range, accessToken)),
     ])
 
+    // Normalise a name for matching:
+    // - lowercase, collapse whitespace
+    // - strip dots from legal suffixes so "S.A.S." == "SAS", "LTDA." == "LTDA", etc.
+    const normName = (s: string) =>
+      s.trim().toLowerCase()
+        .replace(/\s+/g, ' ')           // collapse whitespace
+        .replace(/\b(s\.a\.s|s\.a|ltda|e\.u|s\.a\.s\.)\b\.?/g, m => m.replace(/\./g, ''))
+        .replace(/\./g, '')             // strip any remaining dots (handles variations)
+        .replace(/\s+/g, ' ')           // re-collapse after dot removal
+        .trim()
+
     // SUPPLIERS has col 0 = name, col 1 = NIT
     interface SupplierSheetRow { name: string; nit: string | null }
     const supplierRows: Array<SupplierSheetRow | null> = suppliersData.map(row => {
@@ -185,18 +196,25 @@ Deno.serve(async (req: Request) => {
       Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!,
     )
 
-    const { data: allSuppliers, error: supplierFetchError } = await supabase
-      .from('accounts_suppliers')
-      .select('id, name, nit')
-
-    if (supplierFetchError) throw new Error(`Failed to fetch suppliers: ${supplierFetchError.message}`)
-
+    // Paginate to get all rows (PostgREST max_rows caps single requests at 1000)
     type DbSupplier = { id: string; name: string; nit: string | null }
-    const dbSuppliers = allSuppliers as DbSupplier[]
+    const allSuppliers: DbSupplier[] = []
+    const PAGE = 1000
+    for (let from = 0; ; from += PAGE) {
+      const { data, error } = await supabase
+        .from('accounts_suppliers')
+        .select('id, name, nit')
+        .range(from, from + PAGE - 1)
+      if (error) throw new Error(`Failed to fetch suppliers (page ${from}): ${error.message}`)
+      if (!data || data.length === 0) break
+      allSuppliers.push(...(data as DbSupplier[]))
+      if (data.length < PAGE) break
+    }
+    const dbSuppliers = allSuppliers
 
-    // Key: lower(trim(name)) → uuid
+    // Key: normName(name) → uuid
     const supplierMap = new Map<string, string>(
-      dbSuppliers.map(s => [s.name.trim().toLowerCase(), s.id])
+      dbSuppliers.map(s => [normName(s.name), s.id])
     )
     // Track which db rows already have a NIT so we don't overwrite them
     const dbNitById = new Map<string, string | null>(
@@ -228,7 +246,7 @@ Deno.serve(async (req: Request) => {
 
           const month = col + 1 // 1-indexed
 
-          const supplierId = supplierMap.get(rawName.toLowerCase())
+          const supplierId = supplierMap.get(normName(rawName))
           if (!supplierId) {
             unmatchedSet.add(rawName)
             continue
@@ -252,7 +270,7 @@ Deno.serve(async (req: Request) => {
     const sheetNitByName = new Map<string, string>()
     for (const row of supplierRows) {
       if (!row || !row.nit) continue
-      const key = row.name.toLowerCase()
+      const key = normName(row.name)
       if (!sheetNitByName.has(key)) sheetNitByName.set(key, row.nit)
     }
     // Collect supplier IDs that have a sheet NIT but no db NIT
@@ -288,11 +306,18 @@ Deno.serve(async (req: Request) => {
     /* ── 6. Upsert in batches ───────────────────────────── */
     await upsertBatch(supabase, deduped)
 
+    // Suppliers in PROVNIT with a name but no NIT value in the sheet
+    const missingNitInSheet = supplierRows
+      .filter((r): r is SupplierSheetRow => r !== null && !r.nit)
+      .map(r => r.name)
+      .sort()
+
     return new Response(
       JSON.stringify({
         synced: deduped.length,
         skipped,
         nitsUpdated: nitUpdates.length,
+        missingNitInSheet,
         unmatched: Array.from(unmatchedSet).sort(),
       }),
       { headers },
