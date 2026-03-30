@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from 'react'
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
   MagnifyingGlassIcon,
@@ -26,9 +26,16 @@ interface CppInvoice {
   fecha_vencimiento: string | null
   proveedor: string | null
   empresa: string | null
-  empresa_split: Array<{ code: string; pct: number }> | null
+  empresa_split: Array<{ code: string; pct: number; importe_cop_allocated?: number }> | null
   concepto: string | null
   centro_costo: string | null
+}
+
+type TxRow = {
+  nit: string | null
+  importe_cop: string | number
+  empresa: string | null
+  empresa_split: Array<{ code: string; pct: number; importe_cop_allocated: number }> | null
 }
 
 interface CardData {
@@ -68,6 +75,21 @@ function formatCOP(amount: number): string {
   return '$' + Math.round(amount).toLocaleString('es-CO')
 }
 
+function matchesCompany(r: CppInvoice | TxRow, company: string | null): boolean {
+  if (!company) return true
+  if (r.empresa?.toUpperCase() === company) return true
+  if (r.empresa_split?.some(s => s.code.toUpperCase() === company)) return true
+  return false
+}
+
+function allocatedAmount(r: CppInvoice | TxRow, company: string | null): number {
+  const full = Number(r.importe_cop ?? 0)
+  if (!company || !r.empresa_split) return full
+  const split = r.empresa_split.find(s => s.code.toUpperCase() === company)
+  if (!split) return full
+  return Number(split.importe_cop_allocated) || full * split.pct
+}
+
 /* ─── SearchPage ─────────────────────────────────────────── */
 
 export function SearchPage() {
@@ -81,19 +103,58 @@ export function SearchPage() {
   const searchRef = useRef<HTMLDivElement>(null)
   const debouncedQuery = useDebounce(query, 250)
 
-  // Action card state
-  const [cardLoading, setCardLoading] = useState(true)
-  const [cardError, setCardError] = useState(false)
-  const [aprobadas, setAprobadas]   = useState<CardData | null>(null)
-  const [pendientes, setPendientes] = useState<CardData | null>(null)
-  const [vencidas, setVencidas]     = useState<CardData | null>(null)
-  const [modalData, setModalData]   = useState<{ title: string; rows: CppInvoice[] } | null>(null)
+  // Company filter
+  const [selectedCompany, setSelectedCompany] = useState<string | null>(null)
 
-  // Top 20 state
+  // Raw fetched data
+  const [allCpp, setAllCpp] = useState<CppInvoice[]>([])
+  const [allTx, setAllTx]   = useState<TxRow[]>([])
+
+  // Loading/error
+  const [cardLoading, setCardLoading] = useState(true)
+  const [cardError, setCardError]     = useState(false)
+  const [loadingTop, setLoadingTop]   = useState(true)
+  const [topError, setTopError]       = useState(false)
+
+  // Modal
+  const [modalData, setModalData] = useState<{ title: string; rows: CppInvoice[] } | null>(null)
+
+  // Top 20 results (async)
   const [topSuppliers, setTopSuppliers] = useState<TopSupplierRow[]>([])
-  const [assessments, setAssessments] = useState<Map<string, boolean | null>>(new Map())
-  const [loadingTop, setLoadingTop] = useState(true)
-  const [topError, setTopError] = useState(false)
+  const [assessments, setAssessments]   = useState<Map<string, boolean | null>>(new Map())
+
+  // Available companies (derived from CPP data)
+  const availableCompanies = useMemo(() => {
+    const codes = new Set<string>()
+    for (const r of allCpp) {
+      if (r.empresa) codes.add(r.empresa.toUpperCase())
+      if (r.empresa_split) r.empresa_split.forEach(s => codes.add(s.code.toUpperCase()))
+    }
+    const order = Object.keys(ENTITY_COLORS)
+    return Array.from(codes).sort((a, b) => {
+      const ia = order.indexOf(a)
+      const ib = order.indexOf(b)
+      return (ia === -1 ? 999 : ia) - (ib === -1 ? 999 : ib)
+    })
+  }, [allCpp])
+
+  // Card data derived from allCpp + selectedCompany
+  const today = useMemo(() => new Date().toISOString().slice(0, 10), [])
+
+  const aprobadas = useMemo<CardData>(() => {
+    const rows = allCpp.filter(r => r.aprobado?.toUpperCase() === 'SI' && matchesCompany(r, selectedCompany))
+    return { count: rows.length, total: rows.reduce((s, r) => s + allocatedAmount(r, selectedCompany), 0), rows }
+  }, [allCpp, selectedCompany])
+
+  const pendientes = useMemo<CardData>(() => {
+    const rows = allCpp.filter(r => r.aprobado?.toUpperCase() !== 'SI' && matchesCompany(r, selectedCompany))
+    return { count: rows.length, total: rows.reduce((s, r) => s + allocatedAmount(r, selectedCompany), 0), rows }
+  }, [allCpp, selectedCompany])
+
+  const vencidas = useMemo<CardData>(() => {
+    const rows = allCpp.filter(r => r.fecha_vencimiento && r.fecha_vencimiento < today && matchesCompany(r, selectedCompany))
+    return { count: rows.length, total: rows.reduce((s, r) => s + allocatedAmount(r, selectedCompany), 0), rows }
+  }, [allCpp, selectedCompany, today])
 
   /* ── Typeahead search ─────────────────────────────────── */
   useEffect(() => {
@@ -131,13 +192,12 @@ export function SearchPage() {
     return () => document.removeEventListener('mousedown', handler)
   }, [])
 
-  /* ── Action cards — fetch all CPP rows once, derive three metrics ── */
+  /* ── Fetch CPP rows — stored raw; cards derived via useMemo ── */
   const fetchCards = useCallback(async () => {
     setCardLoading(true)
     setCardError(false)
-
     const PAGE = 1000
-    const allCpp: CppInvoice[] = []
+    const all: CppInvoice[] = []
     for (let from = 0; ; from += PAGE) {
       const { data, error } = await supabase
         .from('cuentas_por_pagar_cache')
@@ -145,45 +205,22 @@ export function SearchPage() {
         .range(from, from + PAGE - 1)
       if (error) { setCardError(true); setCardLoading(false); return }
       if (!data || data.length === 0) break
-      allCpp.push(...(data as unknown as CppInvoice[]))
+      all.push(...(data as unknown as CppInvoice[]))
       if (data.length < PAGE) break
     }
-
-    const today = new Date().toISOString().slice(0, 10)
-
-    const sumRows = (rows: CppInvoice[]): CardData => ({
-      count: rows.length,
-      total: rows.reduce((s, r) => s + Number(r.importe_cop ?? 0), 0),
-      rows,
-    })
-
-    setAprobadas(sumRows(allCpp.filter(r => r.aprobado?.toUpperCase() === 'SI')))
-    setPendientes(sumRows(allCpp.filter(r => r.aprobado?.toUpperCase() !== 'SI')))
-    setVencidas(sumRows(allCpp.filter(r => r.fecha_vencimiento && r.fecha_vencimiento < today)))
-
+    setAllCpp(all)
     setCardLoading(false)
   }, [])
 
   useEffect(() => { void fetchCards() }, [fetchCards])
 
-  /* ── Top 20 by spend · last 60 days · grouped by NIT ─────────────── */
-  const fetchTop20 = useCallback(async () => {
-    setLoadingTop(true)
-    setTopError(false)
-
+  /* ── Fetch TX rows — stored raw; Top 20 recomputed on filter change ── */
+  const fetchAllTx = useCallback(async () => {
     const cutoff = new Date()
     cutoff.setDate(cutoff.getDate() - 60)
     const cutoffStr = cutoff.toISOString().slice(0, 10)
-
-    type TxRow = {
-      nit: string | null
-      importe_cop: string | number
-      empresa: string | null
-      empresa_split: Array<{ code: string; pct: number; importe_cop_allocated: number }> | null
-    }
-
-    const allTx: TxRow[] = []
     const PAGE = 1000
+    const all: TxRow[] = []
     for (let from = 0; ; from += PAGE) {
       const { data, error } = await supabase
         .from('transactions_cache')
@@ -193,25 +230,34 @@ export function SearchPage() {
         .range(from, from + PAGE - 1)
       if (error) { setTopError(true); setLoadingTop(false); return }
       if (!data || data.length === 0) break
-      allTx.push(...(data as unknown as TxRow[]))
+      all.push(...(data as unknown as TxRow[]))
       if (data.length < PAGE) break
     }
+    setAllTx(all)
+  }, [])
 
-    // Group by NIT: sum importe_cop, track per-entity allocated totals
+  useEffect(() => { void fetchAllTx() }, [fetchAllTx])
+
+  const computeTop20 = useCallback(async (txRows: TxRow[], company: string | null) => {
+    setLoadingTop(true)
+    setTopError(false)
+
+    // Group by NIT with optional company filter
     const grouped = new Map<string, { total: number; entityTotals: Map<string, number> }>()
-    for (const r of allTx) {
-      if (!r.nit) continue
-      const amount = Number(r.importe_cop ?? 0)
+    for (const r of txRows) {
+      if (!r.nit || !matchesCompany(r, company)) continue
+      const amount = allocatedAmount(r, company)
       if (!amount) continue
 
       const g = grouped.get(r.nit) ?? { total: 0, entityTotals: new Map() }
       g.total += amount
 
+      // Entity totals for pills always show full allocation
       if (r.empresa) {
-        g.entityTotals.set(r.empresa, (g.entityTotals.get(r.empresa) ?? 0) + amount)
-      } else if (r.empresa_split && Array.isArray(r.empresa_split)) {
+        g.entityTotals.set(r.empresa, (g.entityTotals.get(r.empresa) ?? 0) + Number(r.importe_cop ?? 0))
+      } else if (r.empresa_split) {
         for (const s of r.empresa_split) {
-          const alloc = Number(s.importe_cop_allocated) || amount * s.pct
+          const alloc = Number(s.importe_cop_allocated) || Number(r.importe_cop ?? 0) * s.pct
           g.entityTotals.set(s.code, (g.entityTotals.get(s.code) ?? 0) + alloc)
         }
       }
@@ -224,13 +270,8 @@ export function SearchPage() {
       .slice(0, 20)
       .map(([nit]) => nit)
 
-    if (top20nits.length === 0) {
-      setTopSuppliers([])
-      setLoadingTop(false)
-      return
-    }
+    if (top20nits.length === 0) { setTopSuppliers([]); setLoadingTop(false); return }
 
-    // Fetch supplier records by NIT
     const { data: suppData } = await supabase
       .from('accounts_suppliers')
       .select('id, name, razon_social, nit')
@@ -242,14 +283,14 @@ export function SearchPage() {
     )
 
     const rows: TopSupplierRow[] = top20nits.map(nit => {
-      const data = grouped.get(nit)!
+      const g = grouped.get(nit)!
       const supplier = nitToSupplier.get(nit)
       return {
         id: supplier?.id ?? '',
         nombre: supplier ? (supplier.razon_social || supplier.name) : nit,
         nit,
-        gasto: data.total,
-        entities: Array.from(data.entityTotals.entries())
+        gasto: g.total,
+        entities: Array.from(g.entityTotals.entries())
           .map(([entity, amount_cop]) => ({ entity, amount_cop }))
           .sort((a, b) => b.amount_cop - a.amount_cop),
       }
@@ -257,7 +298,6 @@ export function SearchPage() {
 
     setTopSuppliers(rows)
 
-    // Assessments for matched suppliers
     const ids = rows.map(r => r.id).filter(Boolean)
     if (ids.length > 0) {
       const { data: aData } = await supabase
@@ -272,7 +312,10 @@ export function SearchPage() {
     setLoadingTop(false)
   }, [])
 
-  useEffect(() => { void fetchTop20() }, [fetchTop20])
+  useEffect(() => {
+    if (allTx.length === 0) return
+    void computeTop20(allTx, selectedCompany)
+  }, [allTx, selectedCompany, computeTop20])
 
   /* ── Render ───────────────────────────────────────────── */
   return (
@@ -282,7 +325,8 @@ export function SearchPage() {
       <section>
         <h1 style={pageTitleStyle}>Proveedores</h1>
 
-        <div ref={searchRef} style={{ position: 'relative', maxWidth: 640 }}>
+        <div style={{ display: 'flex', alignItems: 'flex-start', gap: 16 }}>
+        <div ref={searchRef} style={{ position: 'relative', flex: '1 1 0', minWidth: 0, maxWidth: 640 }}>
           <MagnifyingGlassIcon
             width={18}
             height={18}
@@ -368,6 +412,20 @@ export function SearchPage() {
             </div>
           )}
         </div>
+
+        {/* Company filter */}
+        {!cardLoading && availableCompanies.length > 0 && (
+          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
+            <CompanyToggle label="Todas" active={selectedCompany === null} color={null}
+              onClick={() => setSelectedCompany(null)} />
+            {availableCompanies.map(code => (
+              <CompanyToggle key={code} label={code} active={selectedCompany === code}
+                color={ENTITY_COLORS[code] ?? null}
+                onClick={() => setSelectedCompany(selectedCompany === code ? null : code)} />
+            ))}
+          </div>
+        )}
+        </div>{/* end flex row */}
 
         {/* Sub-hint */}
         <p style={{ margin: '10px 0 0', fontSize: '0.8125rem', color: 'var(--hh-haze)', fontWeight: 300 }}>
@@ -770,6 +828,39 @@ function SkeletonRow({ cols, even }: { cols: number; even: boolean }) {
         </td>
       ))}
     </tr>
+  )
+}
+
+/* ─── Company Toggle ─────────────────────────────────────── */
+
+function CompanyToggle({ label, active, color, onClick }: {
+  label: string
+  active: boolean
+  color: { bg: string; text: string } | null
+  onClick: () => void
+}) {
+  const activeBg   = color?.bg   ?? 'var(--hh-teal)'
+  const activeText = color?.text ?? '#fff'
+  return (
+    <button
+      onClick={onClick}
+      style={{
+        fontFamily: 'var(--font-body)',
+        fontWeight: active ? 500 : 400,
+        fontSize: '0.75rem',
+        letterSpacing: '0.05em',
+        padding: '5px 13px',
+        borderRadius: 99,
+        border: `1px solid ${active ? activeBg : 'rgba(122,145,165,0.3)'}`,
+        background: active ? activeBg : 'transparent',
+        color: active ? activeText : 'var(--hh-haze)',
+        cursor: 'pointer',
+        transition: 'all 0.12s',
+        whiteSpace: 'nowrap',
+      }}
+    >
+      {label}
+    </button>
   )
 }
 
