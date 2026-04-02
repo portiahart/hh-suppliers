@@ -1,17 +1,7 @@
-import { NavLink, useNavigate } from 'react-router-dom'
+import { NavLink } from 'react-router-dom'
 import { PersonIcon, PlusCircledIcon } from '@radix-ui/react-icons'
-import { supabase } from '../lib/supabase'
-import { useAuth } from '../context/AuthContext'
 
 export function Sidebar() {
-  const navigate = useNavigate()
-  const { session } = useAuth()
-
-  const handleSignOut = async () => {
-    await supabase.auth.signOut()
-    navigate('/login', { replace: true })
-  }
-
   return (
     <aside
       style={{
@@ -27,25 +17,13 @@ export function Sidebar() {
         zIndex: 10,
       }}
     >
-      {/* Wordmark */}
+      {/* Logo */}
       <div style={{ padding: '28px 24px 24px' }}>
-        <span
-          style={{
-            fontFamily: 'var(--font-display)',
-            fontWeight: 200,
-            fontSize: '1.125rem',
-            color: 'var(--hh-ice)',
-            letterSpacing: '0.02em',
-            lineHeight: 1.2,
-            display: 'block',
-          }}
-        >
-          Hart Hospitality
-          <br />
-          <span style={{ fontStyle: 'italic', fontWeight: 200, fontSize: '0.85rem', color: 'var(--hh-haze)' }}>
-            Group
-          </span>
-        </span>
+        <img
+          src="https://dqfrqjsbfmwtclkclmvc.supabase.co/storage/v1/object/public/brand/HH_white.png"
+          alt="Hart Hospitality Group"
+          style={{ height: 36, width: 'auto', display: 'block' }}
+        />
       </div>
 
       {/* Divider */}
@@ -56,40 +34,6 @@ export function Sidebar() {
         <NavItem to="/" icon={<PersonIcon width={20} height={20} />} label="Proveedores" />
         <NavItem to="/new" icon={<PlusCircledIcon width={20} height={20} />} label="Nuevo Proveedor" />
       </nav>
-
-      {/* Footer */}
-      <div style={{ padding: '16px 24px', borderTop: '1px solid rgba(122,145,165,0.2)' }}>
-        {session?.user.email && (
-          <p style={{
-            fontSize: '0.75rem',
-            color: 'var(--hh-haze)',
-            margin: '0 0 10px',
-            overflow: 'hidden',
-            textOverflow: 'ellipsis',
-            whiteSpace: 'nowrap',
-          }}>
-            {session.user.email}
-          </p>
-        )}
-        <button
-          onClick={() => void handleSignOut()}
-          style={{
-            background: 'transparent',
-            border: '1px solid rgba(122,145,165,0.3)',
-            color: 'var(--hh-haze)',
-            fontFamily: 'var(--font-body)',
-            fontSize: '0.75rem',
-            fontWeight: 500,
-            padding: '6px 12px',
-            borderRadius: 4,
-            cursor: 'pointer',
-            width: '100%',
-            textAlign: 'left',
-          }}
-        >
-          Cerrar sesión
-        </button>
-      </div>
     </aside>
   )
 }
