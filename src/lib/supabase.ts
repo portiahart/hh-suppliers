@@ -84,6 +84,6 @@ supabase.auth.onAuthStateChange((event) => {
 export function suppliersQuery(select = '*') {
   return supabase
     .from('accounts_suppliers')
-    .select('*')
+    .select(select)
     .not('name', 'ilike', 'X -%')
 }
