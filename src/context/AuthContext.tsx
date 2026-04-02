@@ -14,13 +14,32 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
-    void supabase.auth.getSession().then(({ data }) => {
-      setSession(data.session)
-      setLoading(false)
-    })
-
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
-      setSession(session)
+    // IMPORTANT: This callback must NOT await any Supabase operation directly.
+    //
+    // _notifyAllSubscribers() (in auth-js) does `await Promise.all(callbacks)`.
+    // If SIGNED_IN fires during _initialize() (e.g. SSO cookie present), calling
+    // getSession() or supabase.from() inside the callback deadlocks:
+    //
+    //   _initialize() → _notifyAllSubscribers('SIGNED_IN')
+    //     → awaits this callback
+    //       → any supabase call → getSession() → await initializePromise
+    //                                                  ↑ waiting for _initialize() → ∞
+    //
+    // This callback only calls React state setters (synchronous), so it's safe.
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
+      console.log('[AuthContext] event:', event, '| user:', session?.user?.email ?? null, '| exp:', session?.expires_at ?? null);
+      if (event === 'INITIAL_SESSION') {
+        setSession(session)
+        setLoading(false)
+      } else if (event === 'SIGNED_IN') {
+        setSession(session)
+        setLoading(false)
+      } else if (event === 'SIGNED_OUT') {
+        setSession(null)
+        setLoading(false)
+      } else if (event === 'TOKEN_REFRESHED') {
+        setSession(session)
+      }
     })
 
     return () => subscription.unsubscribe()
