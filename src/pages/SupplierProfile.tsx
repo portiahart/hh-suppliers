@@ -1,6 +1,6 @@
 import { useState, useEffect, Fragment } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
-import { ArrowLeftIcon, Pencil1Icon, EyeOpenIcon, EyeClosedIcon, CheckCircledIcon } from '@radix-ui/react-icons'
+import { ArrowLeftIcon, Pencil1Icon, EyeOpenIcon, EyeClosedIcon, CheckCircledIcon, DownloadIcon } from '@radix-ui/react-icons'
 import { useAuth } from '../context/AuthContext'
 import { supabase } from '../lib/supabase'
 import type { Supplier } from '../types/supplier'
@@ -118,7 +118,7 @@ export function SupplierProfile() {
       ) : activeTab === 'Evaluación' ? (
         <EvaluacionTab supplierId={id ?? null} />
       ) : activeTab === 'Gasto' ? (
-        <GastoTab supplierId={id ?? null} />
+        <GastoTab supplierId={id ?? null} nit={supplier?.nit ?? null} />
       ) : (
         <ComingSoon tab={activeTab} />
       )}
@@ -1832,6 +1832,39 @@ function EvaluacionTab({ supplierId }: { supplierId: string | null }) {
 
 /* ─── Gasto Tab ───────────────────────────────────────��───── */
 
+interface TxRow {
+  id: string
+  source: string
+  fecha_operacion: string | null
+  fecha_factura: string | null
+  proveedor: string | null
+  nit: string | null
+  importe_cop: number | null
+  monto_base: number | null
+  total_iva: number | null
+  total_ipc: number | null
+  rete_fuente: number | null
+  rete_ica: number | null
+  concepto: string | null
+  centro_costo: string | null
+  empresa: string | null
+  no_fac: string | null
+}
+
+interface CppRow {
+  id: string
+  fecha_operacion: string | null
+  fecha_factura: string | null
+  fecha_vencimiento: string | null
+  nit: string | null
+  importe_cop: number | null
+  concepto: string | null
+  centro_costo: string | null
+  empresa: string | null
+  no_fac: string | null
+  aprobado: string | null
+}
+
 interface SpendMonthRow {
   entity: string
   year: number
@@ -1869,26 +1902,41 @@ function formatCOPShort(n: number): string {
   return '$' + Math.round(n).toLocaleString('es-CO')
 }
 
-function GastoTab({ supplierId }: { supplierId: string | null }) {
+function GastoTab({ supplierId, nit }: { supplierId: string | null; nit: string | null }) {
+  const [txns, setTxns] = useState<TxRow[]>([])
+  const [cpp, setCpp] = useState<CppRow[]>([])
+  const [txLoading, setTxLoading] = useState(true)
   const [entities, setEntities] = useState<EntityData[]>([])
-  const [loading, setLoading] = useState(true)
-  // Tracks which year pills are expanded: key = "entity|year"
+  const [histLoading, setHistLoading] = useState(true)
   const [expanded, setExpanded] = useState<Set<string>>(new Set())
+  const [toast, setToast] = useState<string | null>(null)
 
+  const showToast = (msg: string) => { setToast(msg); setTimeout(() => setToast(null), 3500) }
+
+  // Financial data by NIT
   useEffect(() => {
-    if (!supplierId) return
+    if (!nit) { setTxLoading(false); return }
+    void (async () => {
+      const [{ data: txData }, { data: cppData }] = await Promise.all([
+        supabase.from('transactions_cache').select('*').eq('nit', nit).order('fecha_operacion', { ascending: false }),
+        supabase.from('cuentas_por_pagar_cache').select('*').eq('nit', nit).order('fecha_operacion', { ascending: false }),
+      ])
+      setTxns((txData as TxRow[]) ?? [])
+      setCpp((cppData as CppRow[]) ?? [])
+      setTxLoading(false)
+    })()
+  }, [nit])
+
+  // Historial by supplierId
+  useEffect(() => {
+    if (!supplierId) { setHistLoading(false); return }
     void (async () => {
       const { data, error } = await supabase
         .from('suppliers_spend_monthly')
         .select('entity, year, month, amount_cop')
         .eq('supplier_id', supplierId)
-        .order('entity')
-        .order('year')
-        .order('month')
-
-      if (error || !data) { setLoading(false); return }
-
-      // Group into EntityData[]
+        .order('entity').order('year').order('month')
+      if (error || !data) { setHistLoading(false); return }
       const entityMap = new Map<string, Map<number, number[]>>()
       for (const row of data as SpendMonthRow[]) {
         if (!entityMap.has(row.entity)) entityMap.set(row.entity, new Map())
@@ -1896,203 +1944,339 @@ function GastoTab({ supplierId }: { supplierId: string | null }) {
         if (!yearMap.has(row.year)) yearMap.set(row.year, Array(12).fill(0))
         yearMap.get(row.year)![row.month - 1] = Number(row.amount_cop)
       }
-
       const result: EntityData[] = Array.from(entityMap.entries()).map(([entity, yearMap]) => ({
         entity,
-        years: Array.from(yearMap.entries())
-          .sort(([a], [b]) => a - b)
-          .map(([year, months]) => ({
-            year,
-            months,
-            total: months.reduce((s, v) => s + v, 0),
-          })),
+        years: Array.from(yearMap.entries()).sort(([a], [b]) => a - b).map(([year, months]) => ({
+          year, months, total: months.reduce((s, v) => s + v, 0),
+        })),
       }))
-
-      // Normalise all entities to the same set of years, always including the current year
       const currentYear = new Date().getFullYear()
       const yearSet = new Set<number>([currentYear])
       result.forEach(e => e.years.forEach(y => yearSet.add(y.year)))
       const allYears = [...yearSet].sort((a, b) => a - b)
-
-      const normalized: EntityData[] = result.map(e => ({
+      setEntities(result.map(e => ({
         ...e,
-        years: allYears.map(yr => {
-          const existing = e.years.find(y => y.year === yr)
-          return existing ?? { year: yr, months: Array(12).fill(0), total: 0 }
-        }),
-      }))
-
-      setEntities(normalized)
-      setLoading(false)
+        years: allYears.map(yr => e.years.find(y => y.year === yr) ?? { year: yr, months: Array(12).fill(0), total: 0 }),
+      })))
+      setHistLoading(false)
     })()
   }, [supplierId])
 
   const toggleYear = (entity: string, year: number) => {
     const key = `${entity}|${year}`
-    setExpanded(prev => {
-      const next = new Set(prev)
-      next.has(key) ? next.delete(key) : next.add(key)
-      return next
-    })
+    setExpanded(prev => { const next = new Set(prev); next.has(key) ? next.delete(key) : next.add(key); return next })
   }
 
-  if (loading) {
+  // ─── Metrics ───
+  const totalPagado = txns.reduce((s, t) => s + (t.importe_cop ?? 0), 0)
+  const promedio = txns.length > 0 ? totalPagado / txns.length : 0
+
+  const retRows = (
+    [
+      { label: 'Rete Fuente', field: 'rete_fuente' },
+      { label: 'Rete ICA',    field: 'rete_ica' },
+      { label: 'IVA',         field: 'total_iva' },
+      { label: 'IPC',         field: 'total_ipc' },
+    ] as const
+  ).map(({ label, field }) => {
+    const rel = txns.filter(t => ((t[field as keyof TxRow] as number | null) ?? 0) > 0)
+    const total = rel.reduce((s, t) => s + ((t[field as keyof TxRow] as number) ?? 0), 0)
+    const baseSum = rel.reduce((s, t) => s + (t.monto_base ?? 0), 0)
+    return { label, total, tasa: baseSum > 0 ? (total / baseSum) * 100 : null, count: rel.length }
+  })
+
+  const today = new Date().toISOString().slice(0, 10)
+  const fmtDate = (d: string | null) =>
+    d ? new Date(d).toLocaleDateString('es-CO', { day: '2-digit', month: '2-digit', year: '2-digit' }) : '—'
+
+  const downloadCSV = () => {
+    const headers = ['Fecha Op','Fecha Fac','Descripción','Clasificación','Importe COP','Empresa','Fuente','No. Factura']
+    const rows = txns.map(t => [
+      t.fecha_operacion ?? '', t.fecha_factura ?? '', t.concepto ?? '',
+      t.centro_costo ?? '', t.importe_cop ?? '', t.empresa ?? '',
+      t.source === 'CASHAPP' ? 'Cash App' : 'Banco', t.no_fac ?? 'N/A',
+    ])
+    const csv = [headers, ...rows].map(r => r.map(v => `"${String(v).replace(/"/g, '""')}"`).join(',')).join('\n')
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a'); a.href = url; a.download = 'transacciones.csv'; a.click()
+    URL.revokeObjectURL(url)
+  }
+
+  const EmpresaPill = ({ empresa }: { empresa: string | null }) => {
+    if (!empresa) return <span style={{ color: 'var(--hh-haze)' }}>—</span>
     return (
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 16, paddingTop: 8 }}>
-        {[100, 140, 80].map((w, i) => (
-          <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-            <span style={{ ...shimmerStyle, width: 36, height: 22, borderRadius: 99 }} />
-            <span style={{ ...shimmerStyle, width: w, height: 22, borderRadius: 6 }} />
-            <span style={{ ...shimmerStyle, width: w - 20, height: 22, borderRadius: 6 }} />
-          </div>
-        ))}
-      </div>
-    )
-  }
-
-  if (entities.length === 0) {
-    return (
-      <div style={{ paddingTop: 48, textAlign: 'center' }}>
-        <p style={{
-          fontFamily: 'var(--font-display)',
-          fontWeight: 300,
-          fontStyle: 'italic',
-          fontSize: '1rem',
-          color: 'var(--hh-haze)',
-          margin: 0,
-        }}>
-          Este proveedor no tiene historial de gasto registrado.
-        </p>
-      </div>
-    )
-  }
-
-  return (
-    <div style={{
-      background: 'var(--hh-white)',
-      border: '1px solid rgba(122,145,165,0.2)',
-      borderRadius: 8,
-      padding: '24px 28px',
-    }}>
-      <h2 style={{
-        fontFamily: 'var(--font-display)',
-        fontWeight: 300,
-        fontSize: '1.0625rem',
-        color: 'var(--hh-dark)',
-        margin: '0 0 20px',
-      }}>
-        Historial de Gasto
-      </h2>
-
-      <div style={{
-        display: 'grid',
-        gridTemplateColumns: `40px repeat(${entities[0]?.years.length ?? 1}, 120px)`,
-        gap: '12px 8px',
-        alignItems: 'start',
-      }}>
-        {entities.map(({ entity, years }) => {
-          const color = ENTITY_COLORS[entity] ?? { bg: 'var(--hh-haze)', text: '#fff' }
-
-          // Find which year (if any) is currently expanded for this entity
-          const expandedYear = years.find(y => expanded.has(`${entity}|${y.year}`))
-
+      <span style={{ display: 'inline-flex', gap: 3, flexWrap: 'wrap' }}>
+        {empresa.split('|').map(p => p.trim()).filter(Boolean).map(p => {
+          const c = ENTITY_COLORS[p] ?? { bg: 'var(--hh-haze)', text: '#fff' }
           return (
-            <Fragment key={entity}>
-              {/* Entity pill */}
-              <span style={{
-                display: 'inline-flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                padding: '3px 10px',
-                borderRadius: 99,
-                background: color.bg,
-                color: color.text,
-                fontFamily: 'var(--font-body)',
-                fontWeight: 500,
-                fontSize: '0.6875rem',
-                letterSpacing: '0.05em',
-                marginTop: 3,
-              }}>
-                {entity}
-              </span>
-
-              {/* Year pills — one per grid column */}
-              {years.map(({ year, total }) => {
-                const key = `${entity}|${year}`
-                const isOpen = expanded.has(key)
-                const isEmpty = total === 0
-                return (
-                  <button
-                    key={year}
-                    onClick={() => toggleYear(entity, year)}
-                    style={{
-                      fontFamily: 'var(--font-body)',
-                      fontWeight: 400,
-                      fontSize: '0.75rem',
-                      background: isOpen ? 'var(--hh-dark)' : 'var(--hh-ice)',
-                      color: isOpen ? 'var(--hh-ice)' : isEmpty ? 'var(--hh-haze)' : 'var(--hh-dark)',
-                      border: `1px solid ${isOpen ? 'var(--hh-dark)' : isEmpty ? 'rgba(122,145,165,0.3)' : 'var(--hh-haze)'}`,
-                      borderRadius: 6,
-                      padding: '4px 10px',
-                      cursor: 'pointer',
-                      whiteSpace: 'nowrap',
-                      transition: 'all 0.15s',
-                      width: '100%',
-                      textAlign: 'center',
-                    }}
-                  >
-                    {year} · {isEmpty ? '—' : formatCOPShort(total)}
-                  </button>
-                )
-              })}
-
-              {/* Expanded month grid — spans all columns */}
-              {expandedYear && (
-                <div style={{
-                  gridColumn: '1 / -1',
-                  marginTop: 2,
-                  background: 'var(--hh-white)',
-                  border: '1px solid rgba(122,145,165,0.15)',
-                  borderRadius: 6,
-                  padding: '14px 16px',
-                  display: 'grid',
-                  gridTemplateColumns: 'repeat(12, 1fr)',
-                  gap: '4px 8px',
-                }}>
-                  {MONTH_LABELS.map((label, i) => {
-                    const amount = expandedYear.months[i]
-                    return (
-                      <div key={label} style={{ textAlign: 'right' }}>
-                        <p style={{
-                          fontFamily: 'var(--font-body)',
-                          fontWeight: 300,
-                          fontSize: '0.6875rem',
-                          color: 'var(--hh-haze)',
-                          margin: '0 0 3px',
-                          textTransform: 'uppercase',
-                          letterSpacing: '0.06em',
-                        }}>
-                          {label}
-                        </p>
-                        <p style={{
-                          fontFamily: 'var(--font-body)',
-                          fontWeight: amount > 0 ? 400 : 300,
-                          fontSize: '0.75rem',
-                          color: amount > 0 ? 'var(--hh-dark)' : 'var(--hh-haze)',
-                          margin: 0,
-                          fontVariantNumeric: 'tabular-nums',
-                        }}>
-                          {amount > 0 ? formatCOPFull(amount) : '—'}
-                        </p>
-                      </div>
-                    )
-                  })}
-                </div>
-              )}
-            </Fragment>
+            <span key={p} style={{
+              display: 'inline-block', padding: '1px 7px', borderRadius: 99,
+              background: c.bg, color: c.text,
+              fontFamily: 'var(--font-body)', fontWeight: 500, fontSize: '0.6875rem',
+            }}>{p}</span>
           )
         })}
-      </div>
+      </span>
+    )
+  }
+
+  const tblTh = retThStyle
+  const tblTd = retTdStyle
+  const tblVal = retValStyle
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+      {toast && (
+        <div style={{
+          position: 'fixed', bottom: 28, right: 28, background: 'var(--hh-dark)', color: 'var(--hh-ice)',
+          fontFamily: 'var(--font-body)', fontSize: '0.8125rem', padding: '12px 20px',
+          borderRadius: 6, zIndex: 100, boxShadow: '0 4px 16px rgba(0,0,0,0.15)',
+        }}>{toast}</div>
+      )}
+
+      {/* ── Card 1: Resumen Financiero ── */}
+      <SectionCard title="Resumen Financiero">
+        {txLoading ? <SkeletonFields /> : (
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 12 }}>
+            {[
+              { label: 'Total Pagado', value: formatCOPFull(totalPagado), accent: 'var(--hh-teal)' },
+              { label: 'Transacciones', value: txns.length.toLocaleString('es-CO'), accent: 'var(--hh-lemon)' },
+              { label: 'Promedio por Tx', value: txns.length > 0 ? formatCOPFull(promedio) : '—', accent: 'var(--hh-haze)' },
+            ].map(({ label, value, accent }) => (
+              <div key={label} style={{
+                background: 'var(--hh-ice)', borderLeft: `4px solid ${accent}`,
+                borderRadius: 6, padding: '14px 18px',
+              }}>
+                <p style={{ fontFamily: 'var(--font-body)', fontWeight: 500, fontSize: '0.6875rem', textTransform: 'uppercase', letterSpacing: '0.1em', color: 'var(--hh-haze)', margin: '0 0 6px' }}>
+                  {label}
+                </p>
+                <p style={{ fontFamily: 'var(--font-display)', fontWeight: 300, fontSize: '1.25rem', color: 'var(--hh-dark)', margin: 0, fontVariantNumeric: 'tabular-nums' }}>
+                  {value}
+                </p>
+              </div>
+            ))}
+          </div>
+        )}
+      </SectionCard>
+
+      {/* ── Card 2: Retenciones Aplicadas ── */}
+      <SectionCard title="Retenciones Aplicadas">
+        {txLoading ? <SkeletonFields /> : (
+          <>
+            <div style={{ overflowX: 'auto' }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 420 }}>
+                <thead>
+                  <tr style={{ borderBottom: '1px solid rgba(122,145,165,0.2)' }}>
+                    {['Concepto', 'Monto', 'Tasa Prom.', 'Txns'].map(h => <th key={h} style={tblTh}>{h}</th>)}
+                  </tr>
+                </thead>
+                <tbody>
+                  {retRows.map((r, i) => (
+                    <tr key={r.label} style={{ background: i % 2 === 1 ? 'var(--hh-ice)' : 'var(--hh-white)' }}>
+                      <td style={{ ...tblTd, fontFamily: 'var(--font-body)', fontWeight: 500, fontSize: '0.875rem', color: 'var(--hh-dark)' }}>{r.label}</td>
+                      <td style={{ ...tblTd, fontFamily: 'var(--font-body)', fontSize: '0.875rem', fontVariantNumeric: 'tabular-nums', color: r.total > 0 ? 'var(--hh-dark)' : 'var(--hh-haze)' }}>
+                        {r.total > 0 ? formatCOPFull(r.total) : '—'}
+                      </td>
+                      <td style={{ ...tblTd, fontFamily: 'var(--font-body)', fontSize: '0.875rem', color: r.tasa != null ? 'var(--hh-dark)' : 'var(--hh-haze)' }}>
+                        {r.tasa != null ? `${r.tasa.toFixed(2)}%` : '—'}
+                      </td>
+                      <td style={{ ...tblTd, fontFamily: 'var(--font-body)', fontSize: '0.875rem', color: r.count > 0 ? 'var(--hh-dark)' : 'var(--hh-haze)' }}>
+                        {r.count > 0 ? r.count : '—'}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <button onClick={() => showToast('Próximamente')} style={{ ...ghostBtnStyle, marginTop: 14 }}>
+              Generar Certificado de Retenciones
+            </button>
+          </>
+        )}
+      </SectionCard>
+
+      {/* ── Card 3: Todas las Transacciones ── */}
+      <SectionCard
+        title={`Todas las Transacciones${!txLoading ? ` (${txns.length})` : ''}`}
+        action={
+          <button onClick={downloadCSV} title="Descargar CSV" style={{ ...ghostBtnStyle, padding: '6px 10px' }}>
+            <DownloadIcon width={14} height={14} />
+          </button>
+        }
+      >
+        {txLoading ? <SkeletonFields /> : txns.length === 0 ? (
+          <p style={{ fontFamily: 'var(--font-display)', fontWeight: 300, fontStyle: 'italic', fontSize: '0.9375rem', color: 'var(--hh-haze)', margin: 0 }}>
+            Sin transacciones registradas.
+          </p>
+        ) : (
+          <div style={{ overflowX: 'auto' }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 800 }}>
+              <thead>
+                <tr style={{ borderBottom: '1px solid rgba(122,145,165,0.2)' }}>
+                  {['Fecha Op','Fecha Fac','Descripción','Clasificación','Importe COP','Empresa','Fuente','No. Factura'].map(h => <th key={h} style={tblTh}>{h}</th>)}
+                </tr>
+              </thead>
+              <tbody>
+                {txns.map((t, i) => (
+                  <tr key={t.id} style={{ background: i % 2 === 1 ? 'var(--hh-ice)' : 'var(--hh-white)' }}>
+                    <td style={tblTd}><span style={{ ...tblVal, whiteSpace: 'nowrap' }}>{fmtDate(t.fecha_operacion)}</span></td>
+                    <td style={tblTd}><span style={{ ...tblVal, whiteSpace: 'nowrap' }}>{fmtDate(t.fecha_factura)}</span></td>
+                    <td style={{ ...tblTd, maxWidth: 200 }}><span style={{ ...tblVal, display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{t.concepto ?? <span style={{ color: 'var(--hh-haze)' }}>—</span>}</span></td>
+                    <td style={tblTd}><span style={{ ...tblVal, whiteSpace: 'nowrap' }}>{t.centro_costo ?? <span style={{ color: 'var(--hh-haze)' }}>—</span>}</span></td>
+                    <td style={{ ...tblTd, textAlign: 'right' }}><span style={{ fontFamily: 'var(--font-body)', fontWeight: 500, fontSize: '0.875rem', color: 'var(--hh-mango)', fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' }}>{formatCOPFull(t.importe_cop ?? 0)}</span></td>
+                    <td style={tblTd}><EmpresaPill empresa={t.empresa} /></td>
+                    <td style={tblTd}><span style={tblVal}>{t.source === 'CASHAPP' ? 'Cash App' : 'Banco'}</span></td>
+                    <td style={tblTd}><span style={{ fontFamily: 'var(--font-body)', fontSize: '0.875rem', fontWeight: 400, color: t.no_fac ? 'var(--hh-teal)' : 'var(--hh-haze)' }}>{t.no_fac ?? 'N/A'}</span></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </SectionCard>
+
+      {/* ── Card 4: Facturas Pagadas ── */}
+      <SectionCard title={`Facturas Pagadas${!txLoading ? ` (${txns.length})` : ''}`}>
+        {txLoading ? <SkeletonFields /> : txns.length === 0 ? (
+          <p style={{ fontFamily: 'var(--font-display)', fontWeight: 300, fontStyle: 'italic', fontSize: '0.9375rem', color: 'var(--hh-haze)', margin: 0 }}>
+            Sin facturas pagadas.
+          </p>
+        ) : (
+          <div style={{ overflowX: 'auto' }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 640 }}>
+              <thead>
+                <tr style={{ borderBottom: '1px solid rgba(122,145,165,0.2)' }}>
+                  {['Fecha Op','Importe COP','No. Factura','Fecha Factura','Concepto','Centro de Costo','Empresa'].map(h => <th key={h} style={tblTh}>{h}</th>)}
+                </tr>
+              </thead>
+              <tbody>
+                {txns.map((t, i) => (
+                  <tr key={t.id} style={{ background: i % 2 === 1 ? 'var(--hh-ice)' : 'var(--hh-white)' }}>
+                    <td style={tblTd}><span style={{ ...tblVal, whiteSpace: 'nowrap' }}>{fmtDate(t.fecha_operacion)}</span></td>
+                    <td style={{ ...tblTd, textAlign: 'right' }}><span style={{ ...tblVal, fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' }}>{formatCOPFull(t.importe_cop ?? 0)}</span></td>
+                    <td style={tblTd}><span style={{ fontFamily: 'var(--font-body)', fontSize: '0.875rem', color: t.no_fac ? 'var(--hh-teal)' : 'var(--hh-haze)' }}>{t.no_fac ?? 'N/A'}</span></td>
+                    <td style={tblTd}><span style={{ ...tblVal, whiteSpace: 'nowrap' }}>{fmtDate(t.fecha_factura)}</span></td>
+                    <td style={{ ...tblTd, maxWidth: 180 }}><span style={{ ...tblVal, display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{t.concepto ?? <span style={{ color: 'var(--hh-haze)' }}>—</span>}</span></td>
+                    <td style={tblTd}><span style={tblVal}>{t.centro_costo ?? <span style={{ color: 'var(--hh-haze)' }}>—</span>}</span></td>
+                    <td style={tblTd}><EmpresaPill empresa={t.empresa} /></td>
+                  </tr>
+                ))}
+              </tbody>
+              <tfoot>
+                <tr style={{ background: 'var(--hh-dark)' }}>
+                  <td style={{ ...tblTd, fontFamily: 'var(--font-body)', fontWeight: 500, fontSize: '0.8125rem', color: 'var(--hh-ice)', borderBottom: 'none' }}>Total Pagado</td>
+                  <td style={{ ...tblTd, textAlign: 'right', fontFamily: 'var(--font-body)', fontWeight: 600, fontSize: '0.875rem', color: 'var(--hh-ice)', fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap', borderBottom: 'none' }}>{formatCOPFull(totalPagado)}</td>
+                  <td colSpan={5} style={{ ...tblTd, borderBottom: 'none' }} />
+                </tr>
+              </tfoot>
+            </table>
+          </div>
+        )}
+      </SectionCard>
+
+      {/* ── Card 5: Cuentas por Pagar ── */}
+      <SectionCard title={`Cuentas por Pagar${!txLoading ? ` (${cpp.length})` : ''}`}>
+        {txLoading ? <SkeletonFields /> : cpp.length === 0 ? (
+          <p style={{ fontFamily: 'var(--font-display)', fontWeight: 300, fontStyle: 'italic', fontSize: '0.9375rem', color: 'var(--hh-haze)', margin: 0 }}>
+            Sin facturas pendientes
+          </p>
+        ) : (
+          <div style={{ overflowX: 'auto' }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 800 }}>
+              <thead>
+                <tr style={{ borderBottom: '1px solid rgba(122,145,165,0.2)' }}>
+                  {['Fecha Op','Importe','No. Factura','Fecha Factura','Concepto','Centro de Costo','Empresa','Vencimiento','Aprobado'].map(h => <th key={h} style={tblTh}>{h}</th>)}
+                </tr>
+              </thead>
+              <tbody>
+                {cpp.map((c, i) => {
+                  const isOverdue = c.fecha_vencimiento != null && c.fecha_vencimiento < today
+                  return (
+                    <tr key={c.id} style={{ background: i % 2 === 1 ? 'var(--hh-ice)' : 'var(--hh-white)' }}>
+                      <td style={tblTd}><span style={{ ...tblVal, whiteSpace: 'nowrap' }}>{fmtDate(c.fecha_operacion)}</span></td>
+                      <td style={{ ...tblTd, textAlign: 'right' }}><span style={{ ...tblVal, fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' }}>{formatCOPFull(c.importe_cop ?? 0)}</span></td>
+                      <td style={tblTd}><span style={{ fontFamily: 'var(--font-body)', fontSize: '0.875rem', color: c.no_fac ? 'var(--hh-teal)' : 'var(--hh-haze)' }}>{c.no_fac ?? 'N/A'}</span></td>
+                      <td style={tblTd}><span style={{ ...tblVal, whiteSpace: 'nowrap' }}>{fmtDate(c.fecha_factura)}</span></td>
+                      <td style={{ ...tblTd, maxWidth: 180 }}><span style={{ ...tblVal, display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{c.concepto ?? <span style={{ color: 'var(--hh-haze)' }}>—</span>}</span></td>
+                      <td style={tblTd}><span style={tblVal}>{c.centro_costo ?? <span style={{ color: 'var(--hh-haze)' }}>—</span>}</span></td>
+                      <td style={tblTd}><EmpresaPill empresa={c.empresa} /></td>
+                      <td style={tblTd}><span style={{ fontFamily: 'var(--font-body)', fontSize: '0.875rem', fontWeight: isOverdue ? 500 : 400, color: isOverdue ? '#dc3545' : 'var(--hh-dark)', whiteSpace: 'nowrap' }}>{fmtDate(c.fecha_vencimiento)}</span></td>
+                      <td style={tblTd}>
+                        <span style={{
+                          display: 'inline-block', padding: '2px 8px', borderRadius: 99,
+                          fontFamily: 'var(--font-body)', fontWeight: 500, fontSize: '0.75rem',
+                          background: c.aprobado === 'SI' ? 'rgba(74,155,142,0.12)' : 'rgba(220,53,69,0.1)',
+                          color: c.aprobado === 'SI' ? 'var(--hh-teal)' : '#dc3545',
+                        }}>
+                          {c.aprobado === 'SI' ? 'Sí' : 'No'}
+                        </span>
+                      </td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </SectionCard>
+
+      {/* ── Historial de Gasto ── */}
+      {histLoading ? (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 16, paddingTop: 8 }}>
+          {[100, 140, 80].map((w, i) => (
+            <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+              <span style={{ ...shimmerStyle, width: 36, height: 22, borderRadius: 99 }} />
+              <span style={{ ...shimmerStyle, width: w, height: 22, borderRadius: 6 }} />
+              <span style={{ ...shimmerStyle, width: w - 20, height: 22, borderRadius: 6 }} />
+            </div>
+          ))}
+        </div>
+      ) : entities.length === 0 ? null : (
+        <div style={{ background: 'var(--hh-white)', border: '1px solid rgba(122,145,165,0.2)', borderRadius: 8, padding: '24px 28px' }}>
+          <h2 style={{ fontFamily: 'var(--font-display)', fontWeight: 300, fontSize: '1.0625rem', color: 'var(--hh-dark)', margin: '0 0 20px' }}>
+            Historial de Gasto
+          </h2>
+          <div style={{ display: 'grid', gridTemplateColumns: `40px repeat(${entities[0]?.years.length ?? 1}, 120px)`, gap: '12px 8px', alignItems: 'start' }}>
+            {entities.map(({ entity, years }) => {
+              const color = ENTITY_COLORS[entity] ?? { bg: 'var(--hh-haze)', text: '#fff' }
+              const expandedYear = years.find(y => expanded.has(`${entity}|${y.year}`))
+              return (
+                <Fragment key={entity}>
+                  <span style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', padding: '3px 10px', borderRadius: 99, background: color.bg, color: color.text, fontFamily: 'var(--font-body)', fontWeight: 500, fontSize: '0.6875rem', letterSpacing: '0.05em', marginTop: 3 }}>
+                    {entity}
+                  </span>
+                  {years.map(({ year, total }) => {
+                    const key = `${entity}|${year}`
+                    const isOpen = expanded.has(key)
+                    const isEmpty = total === 0
+                    return (
+                      <button key={year} onClick={() => toggleYear(entity, year)} style={{ fontFamily: 'var(--font-body)', fontWeight: 400, fontSize: '0.75rem', background: isOpen ? 'var(--hh-dark)' : 'var(--hh-ice)', color: isOpen ? 'var(--hh-ice)' : isEmpty ? 'var(--hh-haze)' : 'var(--hh-dark)', border: `1px solid ${isOpen ? 'var(--hh-dark)' : isEmpty ? 'rgba(122,145,165,0.3)' : 'var(--hh-haze)'}`, borderRadius: 6, padding: '4px 10px', cursor: 'pointer', whiteSpace: 'nowrap', transition: 'all 0.15s', width: '100%', textAlign: 'center' }}>
+                        {year} · {isEmpty ? '—' : formatCOPShort(total)}
+                      </button>
+                    )
+                  })}
+                  {expandedYear && (
+                    <div style={{ gridColumn: '1 / -1', marginTop: 2, background: 'var(--hh-white)', border: '1px solid rgba(122,145,165,0.15)', borderRadius: 6, padding: '14px 16px', display: 'grid', gridTemplateColumns: 'repeat(12, 1fr)', gap: '4px 8px' }}>
+                      {MONTH_LABELS.map((label, i) => {
+                        const amount = expandedYear.months[i]
+                        return (
+                          <div key={label} style={{ textAlign: 'right' }}>
+                            <p style={{ fontFamily: 'var(--font-body)', fontWeight: 300, fontSize: '0.6875rem', color: 'var(--hh-haze)', margin: '0 0 3px', textTransform: 'uppercase', letterSpacing: '0.06em' }}>{label}</p>
+                            <p style={{ fontFamily: 'var(--font-body)', fontWeight: amount > 0 ? 400 : 300, fontSize: '0.75rem', color: amount > 0 ? 'var(--hh-dark)' : 'var(--hh-haze)', margin: 0, fontVariantNumeric: 'tabular-nums' }}>
+                              {amount > 0 ? formatCOPFull(amount) : '—'}
+                            </p>
+                          </div>
+                        )
+                      })}
+                    </div>
+                  )}
+                </Fragment>
+              )
+            })}
+          </div>
+        </div>
+      )}
     </div>
   )
 }
