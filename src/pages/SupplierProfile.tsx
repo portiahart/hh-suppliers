@@ -113,6 +113,8 @@ export function SupplierProfile() {
         <LegalTab supplier={supplier} supplierId={id ?? null} />
       ) : activeTab === 'Bancario' ? (
         <BancarioTab supplierId={id ?? null} />
+      ) : activeTab === 'Documentos' ? (
+        <DocumentosTab supplierId={id ?? null} />
       ) : activeTab === 'Gasto' ? (
         <GastoTab supplierId={id ?? null} />
       ) : (
@@ -1132,6 +1134,299 @@ function BancarioTab({ supplierId }: { supplierId: string | null }) {
             </div>
           )}
         </SectionCard>
+      </div>
+    </>
+  )
+}
+
+/* ─── Documentos Tab ─────────────────────────────────────── */
+
+const DOC_TYPES = [
+  'RUT',
+  'Cámara de Comercio',
+  'Cédula Rep. Legal',
+  'Certificado Bancario',
+  'Certificación Ambiental',
+  'Otro',
+] as const
+
+const ACCEPTED_MIME = ['application/pdf', 'image/jpeg', 'image/png', 'image/webp']
+const MAX_BYTES = 10 * 1024 * 1024
+
+interface DocRow {
+  id: string
+  supplier_id: string
+  document_type: string
+  storage_path: string
+  file_name: string
+  file_size_bytes: number | null
+  mime_type: string | null
+  uploaded_by: string | null
+  created_at: string
+}
+
+function DocumentosTab({ supplierId }: { supplierId: string | null }) {
+  const { session } = useAuth()
+  const [docs, setDocs] = useState<DocRow[]>([])
+  const [loading, setLoading] = useState(true)
+  const [toast, setToast] = useState<string | null>(null)
+  const [uploadType, setUploadType] = useState<string>(DOC_TYPES[0])
+  const [uploadFile, setUploadFile] = useState<File | null>(null)
+  const [uploading, setUploading] = useState(false)
+  const [deletingId, setDeletingId] = useState<string | null>(null)
+
+  const showToast = (msg: string) => {
+    setToast(msg)
+    setTimeout(() => setToast(null), 3500)
+  }
+
+  const fetchDocs = async () => {
+    if (!supplierId) return
+    const { data } = await supabase
+      .from('suppliers_documents')
+      .select('*')
+      .eq('supplier_id', supplierId)
+      .order('created_at', { ascending: false })
+    setDocs((data as DocRow[]) ?? [])
+    setLoading(false)
+  }
+
+  useEffect(() => { void fetchDocs() }, [supplierId])
+
+  const handleUpload = async () => {
+    if (!supplierId || !uploadFile) return
+    if (!ACCEPTED_MIME.includes(uploadFile.type)) {
+      showToast('Tipo de archivo no permitido. Use PDF, JPG, PNG o WEBP.')
+      return
+    }
+    if (uploadFile.size > MAX_BYTES) {
+      showToast('El archivo supera el límite de 10 MB.')
+      return
+    }
+    setUploading(true)
+    const storagePath = `${supplierId}/${uploadType}/${uploadFile.name}`
+    const { error: uploadError } = await supabase.storage
+      .from('supplier-documents')
+      .upload(storagePath, uploadFile, { upsert: true })
+    if (uploadError) {
+      setUploading(false)
+      showToast('Error al subir el archivo.')
+      return
+    }
+    const { error: dbError } = await supabase.from('suppliers_documents').insert({
+      supplier_id: supplierId,
+      document_type: uploadType,
+      storage_path: storagePath,
+      file_name: uploadFile.name,
+      file_size_bytes: uploadFile.size,
+      mime_type: uploadFile.type,
+      uploaded_by: session?.user?.email ?? null,
+    })
+    setUploading(false)
+    if (dbError) { showToast('Archivo subido pero error al registrar.'); return }
+    setUploadFile(null)
+    const input = document.getElementById('doc-file-input') as HTMLInputElement | null
+    if (input) input.value = ''
+    showToast('Documento subido correctamente.')
+    void fetchDocs()
+  }
+
+  const handleDownload = async (doc: DocRow) => {
+    const { data, error } = await supabase.storage
+      .from('supplier-documents')
+      .createSignedUrl(doc.storage_path, 60)
+    if (error || !data?.signedUrl) { showToast('Error al generar enlace de descarga.'); return }
+    window.open(data.signedUrl, '_blank')
+  }
+
+  const handleDelete = async (doc: DocRow) => {
+    setDeletingId(doc.id)
+    const { error: storageErr } = await supabase.storage
+      .from('supplier-documents')
+      .remove([doc.storage_path])
+    if (storageErr) { setDeletingId(null); showToast('Error al eliminar el archivo.'); return }
+    await supabase.from('suppliers_documents').delete().eq('id', doc.id)
+    setDeletingId(null)
+    showToast('Documento eliminado.')
+    void fetchDocs()
+  }
+
+  const formatBytes = (b: number | null) => {
+    if (!b) return ''
+    if (b < 1024) return `${b} B`
+    if (b < 1024 * 1024) return `${(b / 1024).toFixed(0)} KB`
+    return `${(b / (1024 * 1024)).toFixed(1)} MB`
+  }
+
+  const formatDate = (iso: string) =>
+    new Date(iso).toLocaleDateString('es-CO', { day: 'numeric', month: 'short', year: 'numeric' })
+
+  // Group by document_type, preserving predefined order
+  const grouped = DOC_TYPES.reduce<Record<string, DocRow[]>>((acc, t) => {
+    const rows = docs.filter(d => d.document_type === t)
+    if (rows.length) acc[t] = rows
+    return acc
+  }, {} as Record<string, DocRow[]>)
+  // Also catch any "Otro" or unknown types not in predefined list
+  docs.forEach(d => {
+    if (!DOC_TYPES.includes(d.document_type as typeof DOC_TYPES[number]) && !grouped[d.document_type]) {
+      grouped[d.document_type] = docs.filter(x => x.document_type === d.document_type)
+    }
+  })
+
+  const isStaff = !!session?.user
+
+  return (
+    <>
+      {toast && (
+        <div style={{
+          position: 'fixed', bottom: 28, right: 28,
+          background: 'var(--hh-dark)', color: 'var(--hh-ice)',
+          fontFamily: 'var(--font-body)', fontSize: '0.8125rem',
+          padding: '12px 20px', borderRadius: 6, zIndex: 100,
+          boxShadow: '0 4px 16px rgba(0,0,0,0.15)',
+        }}>
+          {toast}
+        </div>
+      )}
+
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+        {loading ? (
+          <SkeletonFields />
+        ) : Object.keys(grouped).length === 0 ? (
+          <p style={{
+            fontFamily: 'var(--font-display)', fontWeight: 300, fontStyle: 'italic',
+            fontSize: '1.0625rem', color: 'var(--hh-haze)', margin: '32px 0',
+          }}>
+            No hay documentos subidos aún.
+          </p>
+        ) : (
+          Object.entries(grouped).map(([type, rows]) => (
+            <div key={type} style={{
+              background: 'var(--hh-white)',
+              border: '1px solid rgba(122,145,165,0.2)',
+              borderRadius: 8,
+              padding: '20px 24px',
+            }}>
+              <p style={{
+                fontFamily: 'var(--font-body)', fontWeight: 500,
+                fontSize: '0.6875rem', textTransform: 'uppercase',
+                letterSpacing: '0.12em', color: 'var(--hh-haze)',
+                margin: '0 0 14px',
+              }}>
+                {type}
+              </p>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                {rows.map(doc => (
+                  <div key={doc.id} style={{
+                    display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                    gap: 12, flexWrap: 'wrap',
+                    padding: '10px 14px',
+                    background: 'var(--hh-ice)',
+                    borderRadius: 6,
+                  }}>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <p style={{
+                        fontFamily: 'var(--font-body)', fontWeight: 500,
+                        fontSize: '0.875rem', color: 'var(--hh-dark)',
+                        margin: '0 0 2px',
+                        overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                      }}>
+                        {doc.file_name}
+                      </p>
+                      <p style={{
+                        fontFamily: 'var(--font-body)', fontWeight: 300,
+                        fontSize: '0.75rem', color: 'var(--hh-haze)', margin: 0,
+                      }}>
+                        {formatDate(doc.created_at)}
+                        {doc.file_size_bytes ? ` · ${formatBytes(doc.file_size_bytes)}` : ''}
+                        {' · '}
+                        {doc.uploaded_by ?? 'Proveedor'}
+                      </p>
+                    </div>
+                    <div style={{ display: 'flex', gap: 8, flexShrink: 0 }}>
+                      <button onClick={() => handleDownload(doc)} style={ghostBtnStyle}>
+                        Descargar
+                      </button>
+                      {isStaff && (
+                        <button
+                          onClick={() => handleDelete(doc)}
+                          disabled={deletingId === doc.id}
+                          style={{
+                            ...ghostBtnStyle,
+                            borderColor: 'rgba(220,53,69,0.4)',
+                            color: deletingId === doc.id ? 'var(--hh-haze)' : '#dc3545',
+                          }}
+                        >
+                          {deletingId === doc.id ? 'Eliminando…' : 'Eliminar'}
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ))
+        )}
+
+        {/* Upload area */}
+        <div style={{
+          background: 'var(--hh-white)',
+          border: '1px solid rgba(122,145,165,0.2)',
+          borderRadius: 8,
+          padding: '20px 24px',
+        }}>
+          <p style={{
+            fontFamily: 'var(--font-display)', fontWeight: 300,
+            fontSize: '1.0625rem', color: 'var(--hh-dark)',
+            margin: '0 0 16px',
+          }}>
+            Subir documento
+          </p>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12, alignItems: 'flex-end' }}>
+            <div>
+              <p style={{ ...labelStyle, marginBottom: 6 }}>Tipo de documento</p>
+              <select
+                value={uploadType}
+                onChange={e => setUploadType(e.target.value)}
+                style={{ ...inputStyle, width: 220 }}
+              >
+                {DOC_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
+              </select>
+            </div>
+            <div>
+              <p style={{ ...labelStyle, marginBottom: 6 }}>Archivo</p>
+              <input
+                id="doc-file-input"
+                type="file"
+                accept=".pdf,.jpg,.jpeg,.png,.webp"
+                onChange={e => setUploadFile(e.target.files?.[0] ?? null)}
+                style={{
+                  fontFamily: 'var(--font-body)', fontSize: '0.8125rem',
+                  color: 'var(--hh-dark)', cursor: 'pointer',
+                }}
+              />
+            </div>
+            <button
+              onClick={handleUpload}
+              disabled={!uploadFile || uploading}
+              style={{
+                ...primaryBtnStyle,
+                opacity: !uploadFile || uploading ? 0.6 : 1,
+                cursor: !uploadFile || uploading ? 'not-allowed' : 'pointer',
+              }}
+            >
+              {uploading ? 'Subiendo…' : 'Subir documento'}
+            </button>
+          </div>
+          <p style={{
+            fontFamily: 'var(--font-body)', fontWeight: 300,
+            fontSize: '0.75rem', color: 'var(--hh-haze)',
+            margin: '10px 0 0',
+          }}>
+            PDF, JPG, PNG o WEBP · Máximo 10 MB
+          </p>
+        </div>
       </div>
     </>
   )
