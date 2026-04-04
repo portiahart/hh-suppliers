@@ -378,7 +378,7 @@ interface LegalData {
   proximity_zone: string | null
 }
 
-type LegalDraft = Omit<LegalData, 'id' | 'supplier_id'>
+type LegalDraft = Omit<LegalData, 'id' | 'supplier_id'> & { tipo_persona: string | null }
 
 interface Retencion {
   id: string
@@ -407,7 +407,7 @@ function LegalTab({ supplier, supplierId }: { supplier: Supplier | null; supplie
   const [toast, setToast] = useState<string | null>(null)
   const [draft, setDraft] = useState<LegalDraft>({
     codigo_tributario: null, ciiu: null, direccion: null,
-    ciudad: null, pais: 'Colombia', proximity_zone: null,
+    ciudad: null, pais: 'Colombia', proximity_zone: null, tipo_persona: null,
   })
 
   const showToast = (msg: string) => {
@@ -436,13 +436,14 @@ function LegalTab({ supplier, supplierId }: { supplier: Supplier | null; supplie
       ciudad: legalData?.ciudad ?? null,
       pais: legalData?.pais ?? 'Colombia',
       proximity_zone: legalData?.proximity_zone ?? null,
+      tipo_persona: supplier?.tipo_persona ?? null,
     })
     setEditing(true)
   }
 
   const cancelEdit = () => {
     setEditing(false)
-    setDraft({ codigo_tributario: null, ciiu: null, direccion: null, ciudad: null, pais: 'Colombia', proximity_zone: null })
+    setDraft({ codigo_tributario: null, ciiu: null, direccion: null, ciudad: null, pais: 'Colombia', proximity_zone: null, tipo_persona: null })
   }
 
   const setField = <K extends keyof LegalDraft>(key: K, value: LegalDraft[K]) => {
@@ -456,18 +457,21 @@ function LegalTab({ supplier, supplierId }: { supplier: Supplier | null; supplie
   const saveEdit = async () => {
     if (!supplierId) return
     setSaving(true)
-    const payload = { ...draft, supplier_id: supplierId, updated_at: new Date().toISOString() }
+    const { tipo_persona, ...legalFields } = draft
+    const payload = { ...legalFields, supplier_id: supplierId, updated_at: new Date().toISOString() }
     if (legalData?.id) {
       const { data, error } = await supabase.from('suppliers_legal').update(payload).eq('id', legalData.id).select().single()
-      setSaving(false)
-      if (error) { showToast('Error al guardar los cambios.'); return }
+      if (error) { setSaving(false); showToast('Error al guardar los cambios.'); return }
       setLegalData(data as LegalData)
     } else {
       const { data, error } = await supabase.from('suppliers_legal').insert(payload).select().single()
-      setSaving(false)
-      if (error) { showToast('Error al guardar los cambios.'); return }
+      if (error) { setSaving(false); showToast('Error al guardar los cambios.'); return }
       setLegalData(data as LegalData)
     }
+    if (tipo_persona !== (supplier?.tipo_persona ?? null)) {
+      await supabase.from('accounts_suppliers').update({ tipo_persona }).eq('id', supplierId)
+    }
+    setSaving(false)
     setEditing(false)
     showToast('Cambios guardados.')
   }
@@ -513,24 +517,28 @@ function LegalTab({ supplier, supplierId }: { supplier: Supplier | null; supplie
           ) : (
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: '20px 32px' }}>
 
-              {/* NIT (read-only) + DIAN button */}
+              {/* NIT (read-only) */}
               <div>
                 <p style={labelStyle}>NIT</p>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginTop: 2 }}>
-                  <p style={{ ...valueStyle, margin: 0 }}>{supplier?.nit || <Muted>—</Muted>}</p>
-                  <button
-                    onClick={() => showToast('Integración DIAN próximamente')}
-                    style={{ ...primaryBtnStyle, fontSize: '0.72rem', padding: '3px 9px' }}
-                  >
-                    Consultar DIAN →
-                  </button>
-                </div>
+                <p style={{ ...valueStyle, marginTop: 2 }}>{supplier?.nit || <Muted>—</Muted>}</p>
               </div>
 
-              {/* Tipo Persona (read-only) */}
+              {/* Tipo Persona */}
               <div>
                 <p style={labelStyle}>Tipo Persona</p>
-                <p style={valueStyle}>{supplier?.tipo_persona || <Muted>—</Muted>}</p>
+                {editing ? (
+                  <select
+                    value={draft.tipo_persona ?? ''}
+                    onChange={e => setField('tipo_persona', e.target.value || null)}
+                    style={inputStyle}
+                  >
+                    <option value="">—</option>
+                    <option value="JURIDICA">JURIDICA</option>
+                    <option value="NATURAL">NATURAL</option>
+                  </select>
+                ) : (
+                  <p style={valueStyle}>{supplier?.tipo_persona || <Muted>—</Muted>}</p>
+                )}
               </div>
 
               <Field
@@ -759,17 +767,17 @@ function RetencionesCard({ supplierId, showToast }: { supplierId: string | null;
                   <td style={retTdStyle}>
                     {editing
                       ? <input type="number" value={r.tarifa_recomendada ?? ''} onChange={e => updateRow(r.id, 'tarifa_recomendada', e.target.value ? Number(e.target.value) : null)} style={{ ...inputStyle, width: 72 }} />
-                      : <span style={{ ...retValStyle, fontVariantNumeric: 'tabular-nums' }}>{r.tarifa_recomendada != null ? `${r.tarifa_recomendada}%` : <Muted>—</Muted>}</span>}
+                      : <span style={{ ...retValStyle, fontFamily: 'var(--font-numeric)', fontVariantNumeric: 'tabular-nums' }}>{r.tarifa_recomendada != null ? `${r.tarifa_recomendada}%` : <Muted>—</Muted>}</span>}
                   </td>
                   <td style={retTdStyle}>
                     {editing
                       ? <input type="number" value={r.base_minima ?? ''} onChange={e => updateRow(r.id, 'base_minima', e.target.value ? Number(e.target.value) : null)} style={{ ...inputStyle, width: 110 }} />
-                      : <span style={{ ...retValStyle, fontVariantNumeric: 'tabular-nums' }}>{r.base_minima != null ? `$${Math.round(r.base_minima).toLocaleString('es-CO')}` : <Muted>—</Muted>}</span>}
+                      : <span style={{ ...retValStyle, fontFamily: 'var(--font-numeric)', fontVariantNumeric: 'tabular-nums' }}>{r.base_minima != null ? `$${Math.round(r.base_minima).toLocaleString('es-CO')}` : <Muted>—</Muted>}</span>}
                   </td>
                   <td style={retTdStyle}>
                     {editing
                       ? <input type="number" value={r.tarifa_aplicada ?? ''} onChange={e => updateRow(r.id, 'tarifa_aplicada', e.target.value ? Number(e.target.value) : null)} style={{ ...inputStyle, width: 72 }} />
-                      : <span style={{ ...retValStyle, fontVariantNumeric: 'tabular-nums' }}>{r.tarifa_aplicada != null ? `${r.tarifa_aplicada}%` : <Muted>—</Muted>}</span>}
+                      : <span style={{ ...retValStyle, fontFamily: 'var(--font-numeric)', fontVariantNumeric: 'tabular-nums' }}>{r.tarifa_aplicada != null ? `${r.tarifa_aplicada}%` : <Muted>—</Muted>}</span>}
                   </td>
                   <td style={retTdStyle}>
                     {editing ? (
@@ -1072,7 +1080,7 @@ function BancarioTab({ supplierId }: { supplierId: string | null }) {
                   />
                 ) : (
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                    <p style={{ ...valueStyle, margin: 0, fontVariantNumeric: 'tabular-nums' }}>
+                    <p style={{ ...valueStyle, margin: 0, fontFamily: 'var(--font-numeric)', fontVariantNumeric: 'tabular-nums' }}>
                       {numCuenta
                         ? (revealed ? numCuenta : <span style={{ color: 'var(--hh-haze)' }}>{maskAccount(numCuenta)}</span>)
                         : <Muted>—</Muted>}
@@ -1696,7 +1704,7 @@ function EvaluacionTab({ supplierId }: { supplierId: string | null }) {
                 paddingBottom: 24, borderBottom: '1px solid rgba(122,145,165,0.15)',
               }}>
                 <span style={{
-                  fontFamily: 'var(--font-display)', fontWeight: 300,
+                  fontFamily: 'var(--font-numeric)', fontWeight: 300,
                   fontSize: '2.5rem', color: 'var(--hh-dark)', lineHeight: 1,
                 }}>
                   {row.total_score}<span style={{ fontSize: '1.25rem', color: 'var(--hh-haze)' }}>/{MAX_TOTAL}</span>
@@ -1802,7 +1810,7 @@ function EvaluacionTab({ supplierId }: { supplierId: string | null }) {
                     Puntaje actual:
                   </span>
                   <span style={{
-                    fontFamily: 'var(--font-display)', fontWeight: 300, fontSize: '1.5rem',
+                    fontFamily: 'var(--font-numeric)', fontWeight: 300, fontSize: '1.5rem',
                     color: liveScore >= 30 ? 'var(--hh-teal)' : 'var(--hh-dark)',
                   }}>
                     {liveScore}<span style={{ fontSize: '0.875rem', color: 'var(--hh-haze)' }}>/{MAX_TOTAL}</span>
@@ -1903,6 +1911,7 @@ function formatCOPShort(n: number): string {
 }
 
 function GastoTab({ supplierId, nit }: { supplierId: string | null; nit: string | null }) {
+  const { session } = useAuth()
   const [txns, setTxns] = useState<TxRow[]>([])
   const [cpp, setCpp] = useState<CppRow[]>([])
   const [txLoading, setTxLoading] = useState(true)
@@ -1910,8 +1919,20 @@ function GastoTab({ supplierId, nit }: { supplierId: string | null; nit: string 
   const [histLoading, setHistLoading] = useState(true)
   const [expanded, setExpanded] = useState<Set<string>>(new Set())
   const [toast, setToast] = useState<string | null>(null)
+  const [userRole, setUserRole] = useState('general_manager')
+  const [rowIndexMap, setRowIndexMap] = useState<Map<string, number>>(new Map())
+  const [approvingId, setApprovingId] = useState<string | null>(null)
 
   const showToast = (msg: string) => { setToast(msg); setTimeout(() => setToast(null), 3500) }
+
+  // User role
+  useEffect(() => {
+    if (!session?.user?.id) return
+    void (async () => {
+      const { data } = await supabase.from('crm_users').select('is_super_admin').eq('id', session.user.id).single()
+      if (data?.is_super_admin) setUserRole('super_admin')
+    })()
+  }, [session])
 
   // Financial data by NIT
   useEffect(() => {
@@ -1922,8 +1943,46 @@ function GastoTab({ supplierId, nit }: { supplierId: string | null; nit: string 
         supabase.from('cuentas_por_pagar_cache').select('*').eq('nit', nit).order('fecha_operacion', { ascending: false }),
       ])
       setTxns((txData as TxRow[]) ?? [])
-      setCpp((cppData as CppRow[]) ?? [])
+      const cppRows = (cppData as CppRow[]) ?? []
+      setCpp(cppRows)
       setTxLoading(false)
+
+      // Build sheet row index map for unapproved CPP rows
+      const unapproved = cppRows.filter(r => r.aprobado !== 'SI')
+      if (unapproved.length === 0) return
+      try {
+        const { data: sheetData } = await supabase.functions.invoke('get-reporte-data', {
+          body: { ranges: ['xPP'] },
+        })
+        if (!sheetData?.success) return
+        const xppRows: unknown[][] = sheetData.ranges?.['xPP'] ?? []
+        const xppStartRow: number = sheetData.xppStartRow || 1
+        const map = new Map<string, number>()
+        xppRows.forEach((row, i) => {
+          const r = row as unknown[]
+          const sheetCell = (idx: number) => { const v = r[idx]; return v == null ? '' : String(v).trim() }
+          // Parse fecha_vencimiento (col 25) — may be a Sheets serial number or ISO string
+          const rawVenc = r[25]
+          let fechaVenc = ''
+          if (typeof rawVenc === 'number') {
+            const d = new Date((rawVenc - 25569) * 86400 * 1000)
+            if (!isNaN(d.getTime())) fechaVenc = d.toISOString().slice(0, 10)
+          } else if (typeof rawVenc === 'string' && rawVenc.trim()) {
+            const d = new Date(rawVenc.trim())
+            if (!isNaN(d.getTime())) fechaVenc = d.toISOString().slice(0, 10)
+          }
+          // Parse importe (col 6)
+          const rawAmt = r[6]
+          const importe = typeof rawAmt === 'number'
+            ? rawAmt
+            : parseFloat(String(rawAmt ?? '').replace(/[^0-9.-]/g, '')) || 0
+          const key = `${Math.round(importe)}|${fechaVenc}|${sheetCell(24)}`
+          map.set(key, xppStartRow + i)
+        })
+        setRowIndexMap(map)
+      } catch {
+        // silently fail — approve buttons won't appear
+      }
     })()
   }, [nit])
 
@@ -1965,6 +2024,27 @@ function GastoTab({ supplierId, nit }: { supplierId: string | null; nit: string 
   const toggleYear = (entity: string, year: number) => {
     const key = `${entity}|${year}`
     setExpanded(prev => { const next = new Set(prev); next.has(key) ? next.delete(key) : next.add(key); return next })
+  }
+
+  // ─── Approve CPP row ───
+  const handleApproveCpp = async (c: CppRow) => {
+    if (!session?.user?.id) return
+    const key = `${Math.round(c.importe_cop ?? 0)}|${c.fecha_vencimiento ?? ''}|${c.empresa ?? ''}`
+    const rowIndex = rowIndexMap.get(key)
+    if (!rowIndex) { showToast('No se encontró la fila en la hoja. Recarga e intenta de nuevo.'); return }
+    setApprovingId(c.id)
+    try {
+      const { data, error } = await supabase.functions.invoke('update-xpp', {
+        body: { action: 'approve', rowIndex, value: true, userId: session.user.id, userRole },
+      })
+      if (error || !data?.success) throw new Error(data?.error || 'Error')
+      setCpp(prev => prev.map(r => r.id === c.id ? { ...r, aprobado: 'SI' } : r))
+      showToast('Factura aprobada.')
+    } catch {
+      showToast('Error al aprobar — intenta de nuevo.')
+    } finally {
+      setApprovingId(null)
+    }
   }
 
   // ─── Metrics ───
@@ -2051,7 +2131,7 @@ function GastoTab({ supplierId, nit }: { supplierId: string | null; nit: string 
                 <p style={{ fontFamily: 'var(--font-body)', fontWeight: 500, fontSize: '0.6875rem', textTransform: 'uppercase', letterSpacing: '0.1em', color: 'var(--hh-haze)', margin: '0 0 6px' }}>
                   {label}
                 </p>
-                <p style={{ fontFamily: 'var(--font-display)', fontWeight: 300, fontSize: '1.25rem', color: 'var(--hh-dark)', margin: 0, fontVariantNumeric: 'tabular-nums' }}>
+                <p style={{ fontFamily: 'var(--font-numeric)', fontWeight: 300, fontSize: '1.25rem', color: 'var(--hh-dark)', margin: 0, fontVariantNumeric: 'tabular-nums' }}>
                   {value}
                 </p>
               </div>
@@ -2075,7 +2155,7 @@ function GastoTab({ supplierId, nit }: { supplierId: string | null; nit: string 
                   {retRows.map((r, i) => (
                     <tr key={r.label} style={{ background: i % 2 === 1 ? 'var(--hh-ice)' : 'var(--hh-white)' }}>
                       <td style={{ ...tblTd, fontFamily: 'var(--font-body)', fontWeight: 500, fontSize: '0.875rem', color: 'var(--hh-dark)' }}>{r.label}</td>
-                      <td style={{ ...tblTd, fontFamily: 'var(--font-body)', fontSize: '0.875rem', fontVariantNumeric: 'tabular-nums', color: r.total > 0 ? 'var(--hh-dark)' : 'var(--hh-haze)' }}>
+                      <td style={{ ...tblTd, fontFamily: 'var(--font-numeric)', fontVariantNumeric: 'tabular-nums', fontSize: '0.875rem', color: r.total > 0 ? 'var(--hh-dark)' : 'var(--hh-haze)' }}>
                         {r.total > 0 ? formatCOPFull(r.total) : '—'}
                       </td>
                       <td style={{ ...tblTd, fontFamily: 'var(--font-body)', fontSize: '0.875rem', color: r.tasa != null ? 'var(--hh-dark)' : 'var(--hh-haze)' }}>
@@ -2124,7 +2204,7 @@ function GastoTab({ supplierId, nit }: { supplierId: string | null; nit: string 
                     <td style={tblTd}><span style={{ ...tblVal, whiteSpace: 'nowrap' }}>{fmtDate(t.fecha_factura)}</span></td>
                     <td style={{ ...tblTd, maxWidth: 200 }}><span style={{ ...tblVal, display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{t.concepto ?? <span style={{ color: 'var(--hh-haze)' }}>—</span>}</span></td>
                     <td style={tblTd}><span style={{ ...tblVal, whiteSpace: 'nowrap' }}>{t.centro_costo ?? <span style={{ color: 'var(--hh-haze)' }}>—</span>}</span></td>
-                    <td style={{ ...tblTd, textAlign: 'right' }}><span style={{ fontFamily: 'var(--font-body)', fontWeight: 500, fontSize: '0.875rem', color: 'var(--hh-mango)', fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' }}>{formatCOPFull(t.importe_cop ?? 0)}</span></td>
+                    <td style={{ ...tblTd, textAlign: 'right' }}><span style={{ fontFamily: 'var(--font-numeric)', fontVariantNumeric: 'tabular-nums', fontWeight: 500, fontSize: '0.875rem', color: 'var(--hh-mango)', whiteSpace: 'nowrap' }}>{formatCOPFull(t.importe_cop ?? 0)}</span></td>
                     <td style={tblTd}><EmpresaPill empresa={t.empresa} /></td>
                     <td style={tblTd}><span style={tblVal}>{t.source === 'CASHAPP' ? 'Cash App' : 'Banco'}</span></td>
                     <td style={tblTd}><span style={{ fontFamily: 'var(--font-body)', fontSize: '0.875rem', fontWeight: 400, color: t.no_fac ? 'var(--hh-teal)' : 'var(--hh-haze)' }}>{t.no_fac ?? 'N/A'}</span></td>
@@ -2154,7 +2234,7 @@ function GastoTab({ supplierId, nit }: { supplierId: string | null; nit: string 
                 {txns.map((t, i) => (
                   <tr key={t.id} style={{ background: i % 2 === 1 ? 'var(--hh-ice)' : 'var(--hh-white)' }}>
                     <td style={tblTd}><span style={{ ...tblVal, whiteSpace: 'nowrap' }}>{fmtDate(t.fecha_operacion)}</span></td>
-                    <td style={{ ...tblTd, textAlign: 'right' }}><span style={{ ...tblVal, fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' }}>{formatCOPFull(t.importe_cop ?? 0)}</span></td>
+                    <td style={{ ...tblTd, textAlign: 'right' }}><span style={{ ...tblVal, fontFamily: 'var(--font-numeric)', fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' }}>{formatCOPFull(t.importe_cop ?? 0)}</span></td>
                     <td style={tblTd}><span style={{ fontFamily: 'var(--font-body)', fontSize: '0.875rem', color: t.no_fac ? 'var(--hh-teal)' : 'var(--hh-haze)' }}>{t.no_fac ?? 'N/A'}</span></td>
                     <td style={tblTd}><span style={{ ...tblVal, whiteSpace: 'nowrap' }}>{fmtDate(t.fecha_factura)}</span></td>
                     <td style={{ ...tblTd, maxWidth: 180 }}><span style={{ ...tblVal, display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{t.concepto ?? <span style={{ color: 'var(--hh-haze)' }}>—</span>}</span></td>
@@ -2166,7 +2246,7 @@ function GastoTab({ supplierId, nit }: { supplierId: string | null; nit: string 
               <tfoot>
                 <tr style={{ background: 'var(--hh-dark)' }}>
                   <td style={{ ...tblTd, fontFamily: 'var(--font-body)', fontWeight: 500, fontSize: '0.8125rem', color: 'var(--hh-ice)', borderBottom: 'none' }}>Total Pagado</td>
-                  <td style={{ ...tblTd, textAlign: 'right', fontFamily: 'var(--font-body)', fontWeight: 600, fontSize: '0.875rem', color: 'var(--hh-ice)', fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap', borderBottom: 'none' }}>{formatCOPFull(totalPagado)}</td>
+                  <td style={{ ...tblTd, textAlign: 'right', fontFamily: 'var(--font-numeric)', fontVariantNumeric: 'tabular-nums', fontWeight: 600, fontSize: '0.875rem', color: 'var(--hh-ice)', whiteSpace: 'nowrap', borderBottom: 'none' }}>{formatCOPFull(totalPagado)}</td>
                   <td colSpan={5} style={{ ...tblTd, borderBottom: 'none' }} />
                 </tr>
               </tfoot>
@@ -2186,7 +2266,7 @@ function GastoTab({ supplierId, nit }: { supplierId: string | null; nit: string 
             <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 800 }}>
               <thead>
                 <tr style={{ borderBottom: '1px solid rgba(122,145,165,0.2)' }}>
-                  {['Fecha Op','Importe','No. Factura','Fecha Factura','Concepto','Centro de Costo','Empresa','Vencimiento','Aprobado'].map(h => <th key={h} style={tblTh}>{h}</th>)}
+                  {['Fecha Op','Importe','No. Factura','Fecha Factura','Concepto','Centro de Costo','Empresa','Vencimiento','Aprobado',''].map(h => <th key={h} style={tblTh}>{h}</th>)}
                 </tr>
               </thead>
               <tbody>
@@ -2195,7 +2275,7 @@ function GastoTab({ supplierId, nit }: { supplierId: string | null; nit: string 
                   return (
                     <tr key={c.id} style={{ background: i % 2 === 1 ? 'var(--hh-ice)' : 'var(--hh-white)' }}>
                       <td style={tblTd}><span style={{ ...tblVal, whiteSpace: 'nowrap' }}>{fmtDate(c.fecha_operacion)}</span></td>
-                      <td style={{ ...tblTd, textAlign: 'right' }}><span style={{ ...tblVal, fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' }}>{formatCOPFull(c.importe_cop ?? 0)}</span></td>
+                      <td style={{ ...tblTd, textAlign: 'right' }}><span style={{ ...tblVal, fontFamily: 'var(--font-numeric)', fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' }}>{formatCOPFull(c.importe_cop ?? 0)}</span></td>
                       <td style={tblTd}><span style={{ fontFamily: 'var(--font-body)', fontSize: '0.875rem', color: c.no_fac ? 'var(--hh-teal)' : 'var(--hh-haze)' }}>{c.no_fac ?? 'N/A'}</span></td>
                       <td style={tblTd}><span style={{ ...tblVal, whiteSpace: 'nowrap' }}>{fmtDate(c.fecha_factura)}</span></td>
                       <td style={{ ...tblTd, maxWidth: 180 }}><span style={{ ...tblVal, display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{c.concepto ?? <span style={{ color: 'var(--hh-haze)' }}>—</span>}</span></td>
@@ -2211,6 +2291,17 @@ function GastoTab({ supplierId, nit }: { supplierId: string | null; nit: string 
                         }}>
                           {c.aprobado === 'SI' ? 'Sí' : 'No'}
                         </span>
+                      </td>
+                      <td style={{ ...tblTd, whiteSpace: 'nowrap' }}>
+                        {c.aprobado !== 'SI' && rowIndexMap.has(`${Math.round(c.importe_cop ?? 0)}|${c.fecha_vencimiento ?? ''}|${c.empresa ?? ''}`) && (
+                          <button
+                            onClick={() => handleApproveCpp(c)}
+                            disabled={approvingId === c.id}
+                            style={{ ...primaryBtnStyle, fontSize: '0.75rem', padding: '4px 10px', opacity: approvingId === c.id ? 0.6 : 1 }}
+                          >
+                            {approvingId === c.id ? 'Aprobando…' : 'Aprobar'}
+                          </button>
+                        )}
                       </td>
                     </tr>
                   )
@@ -2263,7 +2354,7 @@ function GastoTab({ supplierId, nit }: { supplierId: string | null; nit: string 
                         return (
                           <div key={label} style={{ textAlign: 'right' }}>
                             <p style={{ fontFamily: 'var(--font-body)', fontWeight: 300, fontSize: '0.6875rem', color: 'var(--hh-haze)', margin: '0 0 3px', textTransform: 'uppercase', letterSpacing: '0.06em' }}>{label}</p>
-                            <p style={{ fontFamily: 'var(--font-body)', fontWeight: amount > 0 ? 400 : 300, fontSize: '0.75rem', color: amount > 0 ? 'var(--hh-dark)' : 'var(--hh-haze)', margin: 0, fontVariantNumeric: 'tabular-nums' }}>
+                            <p style={{ fontFamily: 'var(--font-numeric)', fontVariantNumeric: 'tabular-nums', fontWeight: amount > 0 ? 400 : 300, fontSize: '0.75rem', color: amount > 0 ? 'var(--hh-dark)' : 'var(--hh-haze)', margin: 0 }}>
                               {amount > 0 ? formatCOPFull(amount) : '—'}
                             </p>
                           </div>
