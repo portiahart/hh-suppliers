@@ -112,7 +112,7 @@ export function SupplierProfile() {
       ) : activeTab === 'Legal' ? (
         <LegalTab supplier={supplier} supplierId={id ?? null} />
       ) : activeTab === 'Bancario' ? (
-        <BancarioTab supplierId={id ?? null} />
+        <BancarioTab supplierId={id ?? null} supplierName={supplier?.name ?? null} />
       ) : activeTab === 'Documentos' ? (
         <DocumentosTab supplierId={id ?? null} />
       ) : activeTab === 'Evaluación' ? (
@@ -842,7 +842,7 @@ function maskAccount(num: string): string {
   return '•••• •••• ' + num.slice(-4)
 }
 
-function BancarioTab({ supplierId }: { supplierId: string | null }) {
+function BancarioTab({ supplierId, supplierName }: { supplierId: string | null; supplierName: string | null }) {
   const { session } = useAuth()
   const [data, setData] = useState<BankingData | null>(null)
   const [loading, setLoading] = useState(true)
@@ -851,6 +851,7 @@ function BancarioTab({ supplierId }: { supplierId: string | null }) {
   const [verifying, setVerifying] = useState(false)
   const [revealed, setRevealed] = useState(false)
   const [toast, setToast] = useState<string | null>(null)
+  const [syncing, setSyncing] = useState(false)
   const [draft, setDraft] = useState<BankingDraft>({
     nombre_beneficiario: null, banco: null, tipo_cuenta: null,
     numero_cuenta: null, tipo_documento_bancolombia: null, verificacion_notas: null,
@@ -888,6 +889,39 @@ function BancarioTab({ supplierId }: { supplierId: string | null }) {
 
   const cancelEdit = () => {
     setEditing(false)
+  }
+
+  const syncFromSheet = async () => {
+    if (!supplierName) { showToast('Sin nombre de proveedor para buscar en hoja.'); return }
+    setSyncing(true)
+    try {
+      const { data: res, error } = await supabase.functions.invoke('get-reporte-data', {
+        body: { ranges: ['NAME'] },
+      })
+      if (error || !res?.success) throw new Error(error?.message ?? res?.error ?? 'Error al leer hoja')
+      const rows: unknown[][] = res.ranges?.NAME ?? []
+      // Row 0 is header; data starts at row 1
+      const match = rows.slice(1).find(row => {
+        const cell = (row as unknown[])[0]
+        return typeof cell === 'string' && cell.trim().toLowerCase() === supplierName.trim().toLowerCase()
+      }) as unknown[] | undefined
+      if (!match) { showToast('Proveedor no encontrado en la hoja.'); setSyncing(false); return }
+      const cell = (i: number) => { const v = match[i]; return typeof v === 'string' && v.trim() ? v.trim() : null }
+      const sheetDraft: BankingDraft = {
+        nombre_beneficiario: cell(13),
+        numero_cuenta:        cell(14),
+        tipo_cuenta:          cell(15),
+        banco:                cell(16),
+        tipo_documento_bancolombia: cell(17),
+        verificacion_notas:   data?.verificacion_notas ?? null,
+      }
+      setDraft(sheetDraft)
+      setEditing(true)
+      showToast('Datos importados desde la hoja. Revisa y guarda.')
+    } catch (e) {
+      showToast(e instanceof Error ? e.message : 'Error al sincronizar.')
+    }
+    setSyncing(false)
   }
 
   const saveEdit = async () => {
@@ -1007,10 +1041,15 @@ function BancarioTab({ supplierId }: { supplierId: string | null }) {
           title="Datos Bancarios"
           action={
             !editing ? (
-              <button onClick={startEdit} style={ghostBtnStyle}>
-                <Pencil1Icon width={14} height={14} />
-                {data ? 'Editar' : 'Agregar'}
-              </button>
+              <div style={{ display: 'flex', gap: 8 }}>
+                <button onClick={syncFromSheet} disabled={syncing} style={ghostBtnStyle}>
+                  {syncing ? 'Importando…' : 'Importar desde hoja'}
+                </button>
+                <button onClick={startEdit} style={ghostBtnStyle}>
+                  <Pencil1Icon width={14} height={14} />
+                  {data ? 'Editar' : 'Agregar'}
+                </button>
+              </div>
             ) : (
               <div style={{ display: 'flex', gap: 8 }}>
                 <button onClick={cancelEdit} style={ghostBtnStyle}>Cancelar</button>
