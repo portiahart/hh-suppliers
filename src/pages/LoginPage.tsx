@@ -1,24 +1,44 @@
-import { useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useState, useEffect } from 'react'
 import { supabase } from '../lib/supabase'
 
 export function LoginPage() {
-  const navigate = useNavigate()
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
+  const [checkingSession, setCheckingSession] = useState(true)
+
+  // If a valid .portiahart.com session cookie already exists (e.g. from another subdomain),
+  // skip the login form entirely.
+  useEffect(() => {
+    supabase.auth.getSession().then(({ data }) => {
+      if (data.session) {
+        window.location.replace('/')
+      } else {
+        setCheckingSession(false)
+      }
+    })
+  }, [])
+
+  if (checkingSession) {
+    return null
+  }
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     setError(null)
     setLoading(true)
-    const { error } = await supabase.auth.signInWithPassword({ email, password })
+    const res = await fetch('/api/auth/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email, password }),
+    })
     setLoading(false)
-    if (error) {
+    if (!res.ok) {
       setError('Correo o contraseña incorrectos.')
     } else {
-      navigate('/', { replace: true })
+      // Hard redirect so the browser client re-initialises and reads the new cookie
+      window.location.replace('/')
     }
   }
 

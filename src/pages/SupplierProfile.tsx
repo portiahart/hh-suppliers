@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, Fragment } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { ArrowLeftIcon, Pencil1Icon } from '@radix-ui/react-icons'
 import { supabase } from '../lib/supabase'
@@ -407,7 +407,21 @@ function GastoTab({ supplierId }: { supplierId: string | null }) {
           })),
       }))
 
-      setEntities(result)
+      // Normalise all entities to the same set of years, always including the current year
+      const currentYear = new Date().getFullYear()
+      const yearSet = new Set<number>([currentYear])
+      result.forEach(e => e.years.forEach(y => yearSet.add(y.year)))
+      const allYears = [...yearSet].sort((a, b) => a - b)
+
+      const normalized: EntityData[] = result.map(e => ({
+        ...e,
+        years: allYears.map(yr => {
+          const existing = e.years.find(y => y.year === yr)
+          return existing ?? { year: yr, months: Array(12).fill(0), total: 0 }
+        }),
+      }))
+
+      setEntities(normalized)
       setLoading(false)
     })()
   }, [supplierId])
@@ -469,7 +483,12 @@ function GastoTab({ supplierId }: { supplierId: string | null }) {
         Historial de Gasto
       </h2>
 
-      <div>
+      <div style={{
+        display: 'grid',
+        gridTemplateColumns: `40px repeat(${entities[0]?.years.length ?? 1}, 120px)`,
+        gap: '12px 8px',
+        alignItems: 'start',
+      }}>
         {entities.map(({ entity, years }) => {
           const color = ENTITY_COLORS[entity] ?? { bg: 'var(--hh-haze)', text: '#fff' }
 
@@ -477,11 +496,12 @@ function GastoTab({ supplierId }: { supplierId: string | null }) {
           const expandedYear = years.find(y => expanded.has(`${entity}|${y.year}`))
 
           return (
-            <div key={entity} style={{ display: 'flex', alignItems: 'flex-start', gap: 12, marginBottom: 16 }}>
+            <Fragment key={entity}>
               {/* Entity pill */}
               <span style={{
                 display: 'inline-flex',
                 alignItems: 'center',
+                justifyContent: 'center',
                 padding: '3px 10px',
                 borderRadius: 99,
                 background: color.bg,
@@ -490,86 +510,85 @@ function GastoTab({ supplierId }: { supplierId: string | null }) {
                 fontWeight: 500,
                 fontSize: '0.6875rem',
                 letterSpacing: '0.05em',
-                flexShrink: 0,
                 marginTop: 3,
               }}>
                 {entity}
               </span>
 
-              {/* Year pills + expanded month grid */}
-              <div style={{ flex: 1 }}>
-                <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                  {years.map(({ year, total }) => {
-                    const key = `${entity}|${year}`
-                    const isOpen = expanded.has(key)
+              {/* Year pills — one per grid column */}
+              {years.map(({ year, total }) => {
+                const key = `${entity}|${year}`
+                const isOpen = expanded.has(key)
+                const isEmpty = total === 0
+                return (
+                  <button
+                    key={year}
+                    onClick={() => toggleYear(entity, year)}
+                    style={{
+                      fontFamily: 'var(--font-body)',
+                      fontWeight: 400,
+                      fontSize: '0.75rem',
+                      background: isOpen ? 'var(--hh-dark)' : 'var(--hh-ice)',
+                      color: isOpen ? 'var(--hh-ice)' : isEmpty ? 'var(--hh-haze)' : 'var(--hh-dark)',
+                      border: `1px solid ${isOpen ? 'var(--hh-dark)' : isEmpty ? 'rgba(122,145,165,0.3)' : 'var(--hh-haze)'}`,
+                      borderRadius: 6,
+                      padding: '4px 10px',
+                      cursor: 'pointer',
+                      whiteSpace: 'nowrap',
+                      transition: 'all 0.15s',
+                      width: '100%',
+                      textAlign: 'center',
+                    }}
+                  >
+                    {year} · {isEmpty ? '—' : formatCOPShort(total)}
+                  </button>
+                )
+              })}
+
+              {/* Expanded month grid — spans all columns */}
+              {expandedYear && (
+                <div style={{
+                  gridColumn: '1 / -1',
+                  marginTop: 2,
+                  background: 'var(--hh-white)',
+                  border: '1px solid rgba(122,145,165,0.15)',
+                  borderRadius: 6,
+                  padding: '14px 16px',
+                  display: 'grid',
+                  gridTemplateColumns: 'repeat(12, 1fr)',
+                  gap: '4px 8px',
+                }}>
+                  {MONTH_LABELS.map((label, i) => {
+                    const amount = expandedYear.months[i]
                     return (
-                      <button
-                        key={year}
-                        onClick={() => toggleYear(entity, year)}
-                        style={{
+                      <div key={label} style={{ textAlign: 'right' }}>
+                        <p style={{
                           fontFamily: 'var(--font-body)',
-                          fontWeight: 400,
+                          fontWeight: 300,
+                          fontSize: '0.6875rem',
+                          color: 'var(--hh-haze)',
+                          margin: '0 0 3px',
+                          textTransform: 'uppercase',
+                          letterSpacing: '0.06em',
+                        }}>
+                          {label}
+                        </p>
+                        <p style={{
+                          fontFamily: 'var(--font-body)',
+                          fontWeight: amount > 0 ? 400 : 300,
                           fontSize: '0.75rem',
-                          background: isOpen ? 'var(--hh-dark)' : 'var(--hh-ice)',
-                          color: isOpen ? 'var(--hh-ice)' : 'var(--hh-dark)',
-                          border: `1px solid ${isOpen ? 'var(--hh-dark)' : 'var(--hh-haze)'}`,
-                          borderRadius: 6,
-                          padding: '4px 10px',
-                          cursor: 'pointer',
-                          whiteSpace: 'nowrap',
-                          transition: 'all 0.15s',
-                        }}
-                      >
-                        {year} · {formatCOPShort(total)}
-                      </button>
+                          color: amount > 0 ? 'var(--hh-dark)' : 'var(--hh-haze)',
+                          margin: 0,
+                          fontVariantNumeric: 'tabular-nums',
+                        }}>
+                          {amount > 0 ? formatCOPFull(amount) : '—'}
+                        </p>
+                      </div>
                     )
                   })}
                 </div>
-
-                {/* Expanded month grid */}
-                {expandedYear && (
-                  <div style={{
-                    marginTop: 10,
-                    background: 'var(--hh-white)',
-                    border: '1px solid rgba(122,145,165,0.15)',
-                    borderRadius: 6,
-                    padding: '14px 16px',
-                    display: 'grid',
-                    gridTemplateColumns: 'repeat(12, 1fr)',
-                    gap: '4px 8px',
-                  }}>
-                    {MONTH_LABELS.map((label, i) => {
-                      const amount = expandedYear.months[i]
-                      return (
-                        <div key={label} style={{ textAlign: 'right' }}>
-                          <p style={{
-                            fontFamily: 'var(--font-body)',
-                            fontWeight: 300,
-                            fontSize: '0.6875rem',
-                            color: 'var(--hh-haze)',
-                            margin: '0 0 3px',
-                            textTransform: 'uppercase',
-                            letterSpacing: '0.06em',
-                          }}>
-                            {label}
-                          </p>
-                          <p style={{
-                            fontFamily: 'var(--font-body)',
-                            fontWeight: amount > 0 ? 400 : 300,
-                            fontSize: '0.75rem',
-                            color: amount > 0 ? 'var(--hh-dark)' : 'var(--hh-haze)',
-                            margin: 0,
-                            fontVariantNumeric: 'tabular-nums',
-                          }}>
-                            {amount > 0 ? formatCOPFull(amount) : '—'}
-                          </p>
-                        </div>
-                      )
-                    })}
-                  </div>
-                )}
-              </div>
-            </div>
+              )}
+            </Fragment>
           )
         })}
       </div>

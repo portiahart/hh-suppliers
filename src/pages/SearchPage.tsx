@@ -9,6 +9,7 @@ import {
 } from '@radix-ui/react-icons'
 import { supabase, suppliersQuery } from '../lib/supabase'
 import type { Supplier } from '../types/supplier'
+import { PendingApprovalsModal } from '../components/PendingApprovalsModal'
 
 /* ─── Types ──────────────────────────────────────────────── */
 
@@ -118,6 +119,7 @@ export function SearchPage() {
 
   // Modal
   const [modalData, setModalData] = useState<{ title: string; rows: CppInvoice[] } | null>(null)
+  const [showPendingModal, setShowPendingModal] = useState(false)
 
   // Top 20 results (async)
   const [topSuppliers, setTopSuppliers] = useState<TopSupplierRow[]>([])
@@ -147,7 +149,14 @@ export function SearchPage() {
   }, [allCpp, selectedCompany])
 
   const pendientes = useMemo<CardData>(() => {
-    const rows = allCpp.filter(r => r.aprobado?.toUpperCase() !== 'SI' && matchesCompany(r, selectedCompany))
+    const now = new Date()
+    const endOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999)
+    const rows = allCpp.filter(r => {
+      if (r.aprobado?.toUpperCase() === 'SI') return false
+      if (!matchesCompany(r, selectedCompany)) return false
+      if (!r.fecha_vencimiento) return false
+      return new Date(r.fecha_vencimiento) <= endOfMonth
+    })
     return { count: rows.length, total: rows.reduce((s, r) => s + allocatedAmount(r, selectedCompany), 0), rows }
   }, [allCpp, selectedCompany])
 
@@ -471,7 +480,7 @@ export function SearchPage() {
             loading={cardLoading}
             error={cardError}
             data={pendientes}
-            onAmountClick={() => pendientes && setModalData({ title: 'Facturas Pendiente Aprobación', rows: pendientes.rows })}
+            onAmountClick={() => setShowPendingModal(true)}
           />
           <ActionCard
             icon={<ExclamationTriangleIcon width={20} height={20} />}
@@ -492,6 +501,14 @@ export function SearchPage() {
           title={modalData.title}
           rows={modalData.rows}
           onClose={() => setModalData(null)}
+        />
+      )}
+
+      {/* ── Pending approvals modal ──────────────────────── */}
+      {showPendingModal && (
+        <PendingApprovalsModal
+          onClose={() => setShowPendingModal(false)}
+          onApproved={() => void fetchCards()}
         />
       )}
 
