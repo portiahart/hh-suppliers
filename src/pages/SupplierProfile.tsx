@@ -108,6 +108,8 @@ export function SupplierProfile() {
       {/* Tab content */}
       {activeTab === 'Resumen' ? (
         <ResumenTab supplier={supplier} loading={loading} onUpdate={setSupplier} />
+      ) : activeTab === 'Legal' ? (
+        <LegalTab supplier={supplier} supplierId={id ?? null} />
       ) : activeTab === 'Gasto' ? (
         <GastoTab supplierId={id ?? null} />
       ) : (
@@ -329,7 +331,475 @@ function ResumenTab({ supplier, loading, onUpdate }: ResumenTabProps) {
   )
 }
 
-/* ─── Gasto Tab ───────────────────────────────────────────── */
+/* ─── Legal Tab ──────────────────────────────────────────── */
+
+const BOLIVAR_TOWNS = new Set([
+  'Turbaco', 'Arjona', 'Mahates', 'Clemencia', 'Santa Rosa', 'Villanueva',
+  'San Estanislao', 'Soplaviento', 'Calamar', 'El Guamo',
+  'San Juan Nepomuceno', 'María la Baja', 'Zambrano',
+])
+
+const COLOMBIAN_CITIES = [
+  'Cartagena',
+  'Turbaco', 'Arjona', 'Mahates', 'Clemencia', 'Santa Rosa', 'Villanueva',
+  'San Estanislao', 'Soplaviento', 'Calamar', 'El Guamo',
+  'San Juan Nepomuceno', 'María la Baja', 'Zambrano',
+  'Bogotá', 'Medellín', 'Cali', 'Barranquilla', 'Bucaramanga',
+  'Pereira', 'Santa Marta', 'Ibagué', 'Pasto', 'Manizales',
+  'Neiva', 'Villavicencio', 'Armenia', 'Montería', 'Valledupar',
+  'Sincelejo', 'Popayán', 'Tunja', 'Riohacha', 'Quibdó',
+  'Florencia', 'Yopal', 'Arauca', 'Mocoa',
+]
+
+function computeZone(ciudad: string): string {
+  const c = ciudad.trim()
+  if (!c) return ''
+  if (c.toLowerCase() === 'cartagena') return 'Cartagena'
+  if (BOLIVAR_TOWNS.has(c)) return 'Bolivar'
+  if (COLOMBIAN_CITIES.includes(c)) return 'Colombia'
+  return 'ROW'
+}
+
+interface LegalData {
+  id: string
+  supplier_id: string
+  codigo_tributario: string | null
+  ciiu: string | null
+  direccion: string | null
+  ciudad: string | null
+  pais: string | null
+  proximity_zone: string | null
+}
+
+type LegalDraft = Omit<LegalData, 'id' | 'supplier_id'>
+
+interface Retencion {
+  id: string
+  supplier_id: string
+  tipo: string
+  concepto: string | null
+  tarifa_recomendada: number | null
+  base_minima: number | null
+  tarifa_aplicada: number | null
+  aplica: boolean
+  notas: string | null
+}
+
+const ZONE_COLORS: Record<string, { bg: string; text: string }> = {
+  Cartagena: { bg: 'var(--hh-teal)',  text: '#fff' },
+  Bolivar:   { bg: 'var(--hh-lemon)', text: 'var(--hh-dark)' },
+  Colombia:  { bg: 'var(--hh-haze)',  text: '#fff' },
+  ROW:       { bg: 'var(--hh-dark)',  text: 'var(--hh-ice)' },
+}
+
+function LegalTab({ supplier, supplierId }: { supplier: Supplier | null; supplierId: string | null }) {
+  const [legalData, setLegalData] = useState<LegalData | null>(null)
+  const [loadingLegal, setLoadingLegal] = useState(true)
+  const [editing, setEditing] = useState(false)
+  const [saving, setSaving] = useState(false)
+  const [toast, setToast] = useState<string | null>(null)
+  const [draft, setDraft] = useState<LegalDraft>({
+    codigo_tributario: null, ciiu: null, direccion: null,
+    ciudad: null, pais: 'Colombia', proximity_zone: null,
+  })
+
+  const showToast = (msg: string) => {
+    setToast(msg)
+    setTimeout(() => setToast(null), 3500)
+  }
+
+  useEffect(() => {
+    if (!supplierId) return
+    void (async () => {
+      const { data } = await supabase
+        .from('suppliers_legal')
+        .select('*')
+        .eq('supplier_id', supplierId)
+        .maybeSingle()
+      setLegalData((data as LegalData) ?? null)
+      setLoadingLegal(false)
+    })()
+  }, [supplierId])
+
+  const startEdit = () => {
+    setDraft({
+      codigo_tributario: legalData?.codigo_tributario ?? null,
+      ciiu: legalData?.ciiu ?? null,
+      direccion: legalData?.direccion ?? null,
+      ciudad: legalData?.ciudad ?? null,
+      pais: legalData?.pais ?? 'Colombia',
+      proximity_zone: legalData?.proximity_zone ?? null,
+    })
+    setEditing(true)
+  }
+
+  const cancelEdit = () => {
+    setEditing(false)
+    setDraft({ codigo_tributario: null, ciiu: null, direccion: null, ciudad: null, pais: 'Colombia', proximity_zone: null })
+  }
+
+  const setField = <K extends keyof LegalDraft>(key: K, value: LegalDraft[K]) => {
+    setDraft(d => {
+      const next = { ...d, [key]: value }
+      if (key === 'ciudad') next.proximity_zone = computeZone(String(value ?? '')) || null
+      return next
+    })
+  }
+
+  const saveEdit = async () => {
+    if (!supplierId) return
+    setSaving(true)
+    const payload = { ...draft, supplier_id: supplierId, updated_at: new Date().toISOString() }
+    if (legalData?.id) {
+      const { data, error } = await supabase.from('suppliers_legal').update(payload).eq('id', legalData.id).select().single()
+      setSaving(false)
+      if (error) { showToast('Error al guardar los cambios.'); return }
+      setLegalData(data as LegalData)
+    } else {
+      const { data, error } = await supabase.from('suppliers_legal').insert(payload).select().single()
+      setSaving(false)
+      if (error) { showToast('Error al guardar los cambios.'); return }
+      setLegalData(data as LegalData)
+    }
+    setEditing(false)
+    showToast('Cambios guardados.')
+  }
+
+  const zone = editing ? (draft.proximity_zone ?? '') : (legalData?.proximity_zone ?? '')
+  const zoneColor = zone ? ZONE_COLORS[zone] : null
+
+  return (
+    <>
+      {toast && (
+        <div style={{
+          position: 'fixed', bottom: 28, right: 28,
+          background: 'var(--hh-dark)', color: 'var(--hh-ice)',
+          fontFamily: 'var(--font-body)', fontSize: '0.8125rem',
+          padding: '12px 20px', borderRadius: 6, zIndex: 100,
+          boxShadow: '0 4px 16px rgba(0,0,0,0.15)',
+        }}>
+          {toast}
+        </div>
+      )}
+
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
+        <SectionCard
+          title="Información Legal"
+          action={
+            !editing ? (
+              <button onClick={startEdit} style={ghostBtnStyle}>
+                <Pencil1Icon width={14} height={14} />
+                {legalData ? 'Editar' : 'Agregar'}
+              </button>
+            ) : (
+              <div style={{ display: 'flex', gap: 8 }}>
+                <button onClick={cancelEdit} style={ghostBtnStyle}>Cancelar</button>
+                <button onClick={saveEdit} disabled={saving} style={primaryBtnStyle}>
+                  {saving ? 'Guardando…' : 'Guardar'}
+                </button>
+              </div>
+            )
+          }
+        >
+          {loadingLegal ? (
+            <SkeletonFields />
+          ) : (
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: '20px 32px' }}>
+
+              {/* NIT (read-only) + DIAN button */}
+              <div>
+                <p style={labelStyle}>NIT</p>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginTop: 2 }}>
+                  <p style={{ ...valueStyle, margin: 0 }}>{supplier?.nit || <Muted>—</Muted>}</p>
+                  <button
+                    onClick={() => showToast('Integración DIAN próximamente')}
+                    style={{ ...primaryBtnStyle, fontSize: '0.72rem', padding: '3px 9px' }}
+                  >
+                    Consultar DIAN →
+                  </button>
+                </div>
+              </div>
+
+              {/* Tipo Persona (read-only) */}
+              <div>
+                <p style={labelStyle}>Tipo Persona</p>
+                <p style={valueStyle}>{supplier?.tipo_persona || <Muted>—</Muted>}</p>
+              </div>
+
+              <Field
+                label="Código Tributario"
+                value={editing ? (draft.codigo_tributario ?? '') : (legalData?.codigo_tributario ?? null)}
+                editing={editing}
+                onChange={v => setField('codigo_tributario', v || null)}
+              />
+
+              <Field
+                label="CIIU"
+                value={editing ? (draft.ciiu ?? '') : (legalData?.ciiu ?? null)}
+                editing={editing}
+                onChange={v => setField('ciiu', v || null)}
+              />
+
+              <Field
+                label="Dirección"
+                value={editing ? (draft.direccion ?? '') : (legalData?.direccion ?? null)}
+                editing={editing}
+                onChange={v => setField('direccion', v || null)}
+              />
+
+              {/* Ciudad — text + datalist */}
+              <div>
+                <p style={labelStyle}>Ciudad</p>
+                {editing ? (
+                  <>
+                    <input
+                      type="text"
+                      list="ciudad-datalist"
+                      value={draft.ciudad ?? ''}
+                      onChange={e => setField('ciudad', e.target.value || null)}
+                      placeholder="Ciudad…"
+                      style={inputStyle}
+                    />
+                    <datalist id="ciudad-datalist">
+                      {COLOMBIAN_CITIES.map(c => <option key={c} value={c} />)}
+                    </datalist>
+                  </>
+                ) : (
+                  <p style={valueStyle}>{legalData?.ciudad || <Muted>—</Muted>}</p>
+                )}
+              </div>
+
+              <Field
+                label="País"
+                value={editing ? (draft.pais ?? 'Colombia') : (legalData?.pais ?? 'Colombia')}
+                editing={editing}
+                onChange={v => setField('pais', v || null)}
+              />
+
+              {/* Zona de Proximidad (computed, read-only) */}
+              <div>
+                <p style={labelStyle}>Zona de Proximidad</p>
+                {zone && zoneColor ? (
+                  <span style={{
+                    display: 'inline-block',
+                    padding: '3px 12px',
+                    borderRadius: 99,
+                    background: zoneColor.bg,
+                    color: zoneColor.text,
+                    fontFamily: 'var(--font-body)',
+                    fontWeight: 500,
+                    fontSize: '0.75rem',
+                    letterSpacing: '0.04em',
+                  }}>
+                    {zone}
+                  </span>
+                ) : (
+                  <p style={valueStyle}><Muted>—</Muted></p>
+                )}
+              </div>
+
+            </div>
+          )}
+        </SectionCard>
+
+        {!loadingLegal && <RetencionesCard supplierId={supplierId} showToast={showToast} />}
+      </div>
+    </>
+  )
+}
+
+/* ─── Retenciones Card ───────────────────────────────────── */
+
+function RetencionesCard({ supplierId, showToast }: { supplierId: string | null; showToast: (m: string) => void }) {
+  const [rows, setRows] = useState<Retencion[]>([])
+  const [loading, setLoading] = useState(true)
+  const [editing, setEditing] = useState(false)
+  const [saving, setSaving] = useState(false)
+  const [draftRows, setDraftRows] = useState<Retencion[]>([])
+  const [counter, setCounter] = useState(0)
+
+  useEffect(() => {
+    if (!supplierId) return
+    void (async () => {
+      const { data } = await supabase
+        .from('suppliers_retenciones')
+        .select('*')
+        .eq('supplier_id', supplierId)
+        .order('created_at')
+      setRows((data as Retencion[]) ?? [])
+      setLoading(false)
+    })()
+  }, [supplierId])
+
+  const startEdit = () => { setDraftRows(rows.map(r => ({ ...r }))); setEditing(true) }
+  const cancelEdit = () => { setEditing(false); setDraftRows([]) }
+
+  const addRow = () => {
+    const tempId = `new-${counter}`
+    setCounter(c => c + 1)
+    setDraftRows(prev => [...prev, {
+      id: tempId,
+      supplier_id: supplierId ?? '',
+      tipo: 'RetenFuente',
+      concepto: null,
+      tarifa_recomendada: null,
+      base_minima: null,
+      tarifa_aplicada: null,
+      aplica: true,
+      notas: null,
+    }])
+  }
+
+  const updateRow = (id: string, field: keyof Retencion, value: unknown) => {
+    setDraftRows(prev => prev.map(r => r.id === id ? { ...r, [field]: value } : r))
+  }
+
+  const saveEdit = async () => {
+    if (!supplierId) return
+    setSaving(true)
+    try {
+      const isNew = (id: string) => id.startsWith('new-')
+      const existing = draftRows.filter(r => !isNew(r.id))
+      const added    = draftRows.filter(r =>  isNew(r.id))
+
+      for (const r of existing) {
+        await supabase.from('suppliers_retenciones').update({
+          tipo: r.tipo, concepto: r.concepto,
+          tarifa_recomendada: r.tarifa_recomendada, base_minima: r.base_minima,
+          tarifa_aplicada: r.tarifa_aplicada, aplica: r.aplica, notas: r.notas,
+          updated_at: new Date().toISOString(),
+        }).eq('id', r.id)
+      }
+
+      if (added.length > 0) {
+        await supabase.from('suppliers_retenciones').insert(added.map(r => ({
+          supplier_id: supplierId,
+          tipo: r.tipo, concepto: r.concepto,
+          tarifa_recomendada: r.tarifa_recomendada, base_minima: r.base_minima,
+          tarifa_aplicada: r.tarifa_aplicada, aplica: r.aplica, notas: r.notas,
+        })))
+      }
+
+      const { data } = await supabase
+        .from('suppliers_retenciones').select('*')
+        .eq('supplier_id', supplierId).order('created_at')
+      setRows((data as Retencion[]) ?? [])
+      setEditing(false)
+      showToast('Retenciones guardadas.')
+    } catch {
+      showToast('Error al guardar las retenciones.')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const displayRows = editing ? draftRows : rows
+
+  return (
+    <SectionCard
+      title="Retenciones"
+      action={
+        !editing ? (
+          <button onClick={startEdit} style={ghostBtnStyle}>
+            <Pencil1Icon width={14} height={14} />
+            Editar
+          </button>
+        ) : (
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button onClick={cancelEdit} style={ghostBtnStyle}>Cancelar</button>
+            <button onClick={saveEdit} disabled={saving} style={primaryBtnStyle}>
+              {saving ? 'Guardando…' : 'Guardar'}
+            </button>
+          </div>
+        )
+      }
+    >
+      {loading ? (
+        <SkeletonFields />
+      ) : displayRows.length === 0 && !editing ? (
+        <p style={{ fontFamily: 'var(--font-body)', fontWeight: 300, fontSize: '0.875rem', color: 'var(--hh-haze)', margin: 0 }}>
+          Sin retenciones registradas.
+        </p>
+      ) : (
+        <div style={{ overflowX: 'auto' }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 720 }}>
+            <thead>
+              <tr style={{ borderBottom: '1px solid rgba(122,145,165,0.2)' }}>
+                {['Tipo', 'Concepto', 'Tarifa Rec. (%)', 'Base Mínima (COP)', 'Tarifa Aplic. (%)', 'Aplica', 'Notas'].map(h => (
+                  <th key={h} style={retThStyle}>{h}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {displayRows.map((r, idx) => (
+                <tr key={r.id} style={{ background: idx % 2 === 1 ? 'var(--hh-ice)' : 'var(--hh-white)' }}>
+                  <td style={retTdStyle}>
+                    {editing ? (
+                      <select value={r.tipo} onChange={e => updateRow(r.id, 'tipo', e.target.value)} style={{ ...inputStyle, width: 'auto' }}>
+                        <option>RetenFuente</option>
+                        <option>ReteICA</option>
+                        <option>ReteIVA</option>
+                      </select>
+                    ) : (
+                      <span style={{ fontFamily: 'var(--font-body)', fontSize: '0.8125rem', fontWeight: 500 }}>{r.tipo}</span>
+                    )}
+                  </td>
+                  <td style={retTdStyle}>
+                    {editing
+                      ? <input type="text" value={r.concepto ?? ''} onChange={e => updateRow(r.id, 'concepto', e.target.value || null)} style={inputStyle} />
+                      : <span style={retValStyle}>{r.concepto ?? <Muted>—</Muted>}</span>}
+                  </td>
+                  <td style={retTdStyle}>
+                    {editing
+                      ? <input type="number" value={r.tarifa_recomendada ?? ''} onChange={e => updateRow(r.id, 'tarifa_recomendada', e.target.value ? Number(e.target.value) : null)} style={{ ...inputStyle, width: 72 }} />
+                      : <span style={{ ...retValStyle, fontVariantNumeric: 'tabular-nums' }}>{r.tarifa_recomendada != null ? `${r.tarifa_recomendada}%` : <Muted>—</Muted>}</span>}
+                  </td>
+                  <td style={retTdStyle}>
+                    {editing
+                      ? <input type="number" value={r.base_minima ?? ''} onChange={e => updateRow(r.id, 'base_minima', e.target.value ? Number(e.target.value) : null)} style={{ ...inputStyle, width: 110 }} />
+                      : <span style={{ ...retValStyle, fontVariantNumeric: 'tabular-nums' }}>{r.base_minima != null ? `$${Math.round(r.base_minima).toLocaleString('es-CO')}` : <Muted>—</Muted>}</span>}
+                  </td>
+                  <td style={retTdStyle}>
+                    {editing
+                      ? <input type="number" value={r.tarifa_aplicada ?? ''} onChange={e => updateRow(r.id, 'tarifa_aplicada', e.target.value ? Number(e.target.value) : null)} style={{ ...inputStyle, width: 72 }} />
+                      : <span style={{ ...retValStyle, fontVariantNumeric: 'tabular-nums' }}>{r.tarifa_aplicada != null ? `${r.tarifa_aplicada}%` : <Muted>—</Muted>}</span>}
+                  </td>
+                  <td style={retTdStyle}>
+                    {editing ? (
+                      <input type="checkbox" checked={r.aplica} onChange={e => updateRow(r.id, 'aplica', e.target.checked)}
+                        style={{ cursor: 'pointer', width: 16, height: 16 }} />
+                    ) : (
+                      <span style={{
+                        display: 'inline-block', padding: '2px 8px', borderRadius: 99,
+                        background: r.aplica ? 'rgba(74,155,142,0.12)' : 'rgba(122,145,165,0.12)',
+                        color: r.aplica ? 'var(--hh-teal)' : 'var(--hh-haze)',
+                        fontSize: '0.75rem', fontWeight: 500,
+                      }}>
+                        {r.aplica ? 'Sí' : 'No'}
+                      </span>
+                    )}
+                  </td>
+                  <td style={retTdStyle}>
+                    {editing
+                      ? <input type="text" value={r.notas ?? ''} onChange={e => updateRow(r.id, 'notas', e.target.value || null)} style={inputStyle} />
+                      : <span style={retValStyle}>{r.notas ?? <Muted>—</Muted>}</span>}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+      {editing && (
+        <button onClick={addRow} style={{ ...ghostBtnStyle, marginTop: 12 }}>
+          + Agregar retención
+        </button>
+      )}
+    </SectionCard>
+  )
+}
+
+/* ─── Gasto Tab ───────────────────────────────────────��───── */
 
 interface SpendMonthRow {
   entity: string
@@ -772,4 +1242,29 @@ const primaryBtnStyle: React.CSSProperties = {
   padding: '6px 16px',
   borderRadius: 4,
   cursor: 'pointer',
+}
+
+const retThStyle: React.CSSProperties = {
+  fontFamily: 'var(--font-body)',
+  fontWeight: 500,
+  fontSize: '0.6875rem',
+  textTransform: 'uppercase',
+  letterSpacing: '0.1em',
+  color: 'var(--hh-teal)',
+  padding: '8px 12px',
+  textAlign: 'left',
+  whiteSpace: 'nowrap',
+}
+
+const retTdStyle: React.CSSProperties = {
+  padding: '8px 12px',
+  borderBottom: '1px solid rgba(122,145,165,0.08)',
+  verticalAlign: 'middle',
+}
+
+const retValStyle: React.CSSProperties = {
+  fontFamily: 'var(--font-body)',
+  fontWeight: 400,
+  fontSize: '0.875rem',
+  color: 'var(--hh-dark)',
 }
