@@ -115,6 +115,8 @@ export function SupplierProfile() {
         <BancarioTab supplierId={id ?? null} />
       ) : activeTab === 'Documentos' ? (
         <DocumentosTab supplierId={id ?? null} />
+      ) : activeTab === 'Evaluación' ? (
+        <EvaluacionTab supplierId={id ?? null} />
       ) : activeTab === 'Gasto' ? (
         <GastoTab supplierId={id ?? null} />
       ) : (
@@ -1428,6 +1430,402 @@ function DocumentosTab({ supplierId }: { supplierId: string | null }) {
           </p>
         </div>
       </div>
+    </>
+  )
+}
+
+/* ─── Evaluación Tab ─────────────────────────────────────── */
+
+interface QuestionOption {
+  label: string
+  score: number
+}
+
+interface Question {
+  key: string
+  text: string
+  maxScore: number
+  options: QuestionOption[]
+}
+
+const HST_QUESTIONS: Question[] = [
+  {
+    key: 'q1', text: '¿Qué tipo de organización es?', maxScore: 5,
+    options: [
+      { label: 'Empresa Formal', score: 5 },
+      { label: 'Empresa Social / Beneficio e Interés Colectivo', score: 3 },
+      { label: 'Cooperativo', score: 4 },
+      { label: 'ESAL / ONG', score: 1 },
+      { label: 'Empresa Informal o Persona Natural', score: 0 },
+      { label: 'Otro', score: 0 },
+    ],
+  },
+  {
+    key: 'q2', text: '¿De dónde es la organización?', maxScore: 5,
+    options: [
+      { label: 'Cartagena', score: 5 },
+      { label: 'Bolívar', score: 3 },
+      { label: 'Colombia', score: 2 },
+      { label: 'Extranjería', score: 0 },
+    ],
+  },
+  {
+    key: 'q3', text: '¿Cuántas personas trabajan en la organización?', maxScore: 4,
+    options: [
+      { label: 'Menos de 10', score: 4 },
+      { label: 'Entre 10 y 50', score: 3 },
+      { label: 'Más de 50', score: 1 },
+    ],
+  },
+  {
+    key: 'q4', text: '¿Conocimos o podemos hablar con el dueño/a o representante legal?', maxScore: 3,
+    options: [
+      { label: 'Sí', score: 3 },
+      { label: 'No', score: 0 },
+    ],
+  },
+  {
+    key: 'q5', text: '¿En cuál estrato está ubicada su operación principal?', maxScore: 5,
+    options: [
+      { label: '0, 1 o 2', score: 5 },
+      { label: '3 o 4', score: 2 },
+      { label: '5 o 6', score: 0 },
+      { label: 'No sé / No aplica', score: 0 },
+    ],
+  },
+  {
+    key: 'q6', text: '¿Los líderes de la organización son de una minoría?', maxScore: 3,
+    options: [
+      { label: 'Sí', score: 3 },
+      { label: 'No', score: 0 },
+    ],
+  },
+  {
+    key: 'q7', text: '¿La organización tiene y muestra públicamente un compromiso ambiental?', maxScore: 3,
+    options: [
+      { label: 'Sí', score: 3 },
+      { label: 'No', score: 0 },
+    ],
+  },
+  {
+    key: 'q8', text: '¿La organización tiene y muestra públicamente un compromiso sociocultural?', maxScore: 3,
+    options: [
+      { label: 'Sí', score: 3 },
+      { label: 'No', score: 0 },
+    ],
+  },
+  {
+    key: 'q9', text: '¿Está la empresa o el producto certificado?', maxScore: 5,
+    options: [
+      { label: 'Sí', score: 5 },
+      { label: 'No', score: 0 },
+    ],
+  },
+  {
+    key: 'q10', text: '¿Sus productos o servicios tienen como propósito principal mejorar impactos ambiental o sociocultural?', maxScore: 3,
+    options: [
+      { label: 'Sí', score: 3 },
+      { label: 'No', score: 0 },
+      { label: 'No sé', score: 0 },
+    ],
+  },
+  {
+    key: 'q11', text: '¿Sus colaboradores están contratados formalmente con sueldo digno y prestaciones sociales?', maxScore: 5,
+    options: [
+      { label: 'Sí', score: 5 },
+      { label: 'No', score: 0 },
+      { label: 'No Aplica', score: 0 },
+    ],
+  },
+  {
+    key: 'q12', text: '¿Han visitado Blue Apple o Townhouse en los últimos 12 meses?', maxScore: 3,
+    options: [
+      { label: 'Sí', score: 3 },
+      { label: 'No', score: 0 },
+    ],
+  },
+  {
+    key: 'q13', text: '¿Están dispuestos a mandar fotos o permitir una inspección presencial?', maxScore: 3,
+    options: [
+      { label: 'Sí', score: 3 },
+      { label: 'No', score: 0 },
+    ],
+  },
+]
+
+const MAX_TOTAL = HST_QUESTIONS.reduce((s, q) => s + q.maxScore, 0) // 50
+
+type Answers = Record<string, string> // key → option label
+
+interface AssessmentRow {
+  id: string
+  supplier_id: string
+  answers: Answers
+  total_score: number
+  pass: boolean
+  assessed_at: string
+  assessed_by: string | null
+}
+
+function computeScore(answers: Answers): number {
+  return HST_QUESTIONS.reduce((sum, q) => {
+    const selected = q.options.find(o => o.label === answers[q.key])
+    return sum + (selected?.score ?? 0)
+  }, 0)
+}
+
+function EvaluacionTab({ supplierId }: { supplierId: string | null }) {
+  const { session } = useAuth()
+  const [row, setRow] = useState<AssessmentRow | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [editing, setEditing] = useState(false)
+  const [saving, setSaving] = useState(false)
+  const [toast, setToast] = useState<string | null>(null)
+  const [draft, setDraft] = useState<Answers>({})
+
+  const showToast = (msg: string) => {
+    setToast(msg)
+    setTimeout(() => setToast(null), 3500)
+  }
+
+  useEffect(() => {
+    if (!supplierId) return
+    void (async () => {
+      const { data } = await supabase
+        .from('suppliers_assessment')
+        .select('*')
+        .eq('supplier_id', supplierId)
+        .maybeSingle()
+      setRow((data as AssessmentRow) ?? null)
+      setLoading(false)
+    })()
+  }, [supplierId])
+
+  const startEdit = () => {
+    setDraft(row?.answers ?? {})
+    setEditing(true)
+  }
+
+  const cancelEdit = () => {
+    setEditing(false)
+    setDraft({})
+  }
+
+  const saveEdit = async () => {
+    if (!supplierId) return
+    setSaving(true)
+    const score = computeScore(draft)
+    const pass = score >= 30
+    const payload = {
+      supplier_id: supplierId,
+      answers: draft,
+      total_score: score,
+      pass,
+      assessed_at: new Date().toISOString(),
+      assessed_by: session?.user?.email ?? null,
+    }
+    if (row?.id) {
+      const { data, error } = await supabase
+        .from('suppliers_assessment').update(payload).eq('id', row.id).select().single()
+      setSaving(false)
+      if (error) { showToast('Error al guardar la evaluación.'); return }
+      setRow(data as AssessmentRow)
+    } else {
+      const { data, error } = await supabase
+        .from('suppliers_assessment').insert(payload).select().single()
+      setSaving(false)
+      if (error) { showToast('Error al guardar la evaluación.'); return }
+      setRow(data as AssessmentRow)
+    }
+    setEditing(false)
+    setDraft({})
+    showToast('Evaluación guardada.')
+  }
+
+  const liveScore = computeScore(draft)
+  const answeredCount = Object.keys(draft).length
+
+  const formatDate = (iso: string) =>
+    new Date(iso).toLocaleDateString('es-CO', { day: 'numeric', month: 'long', year: 'numeric' })
+
+  return (
+    <>
+      {toast && (
+        <div style={{
+          position: 'fixed', bottom: 28, right: 28,
+          background: 'var(--hh-dark)', color: 'var(--hh-ice)',
+          fontFamily: 'var(--font-body)', fontSize: '0.8125rem',
+          padding: '12px 20px', borderRadius: 6, zIndex: 100,
+          boxShadow: '0 4px 16px rgba(0,0,0,0.15)',
+        }}>
+          {toast}
+        </div>
+      )}
+
+      <SectionCard
+        title="Happy Supplier Test"
+        action={
+          !editing ? (
+            <button onClick={startEdit} style={ghostBtnStyle}>
+              <Pencil1Icon width={14} height={14} />
+              {row ? 'Editar' : 'Evaluar'}
+            </button>
+          ) : (
+            <div style={{ display: 'flex', gap: 8 }}>
+              <button onClick={cancelEdit} style={ghostBtnStyle}>Cancelar</button>
+              <button onClick={saveEdit} disabled={saving || answeredCount < HST_QUESTIONS.length} style={{
+                ...primaryBtnStyle,
+                opacity: saving || answeredCount < HST_QUESTIONS.length ? 0.6 : 1,
+                cursor: saving || answeredCount < HST_QUESTIONS.length ? 'not-allowed' : 'pointer',
+              }}>
+                {saving ? 'Guardando…' : 'Guardar evaluación'}
+              </button>
+            </div>
+          )
+        }
+      >
+        {loading ? (
+          <SkeletonFields />
+        ) : (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 28 }}>
+
+            {/* Score display — shown in read mode when row exists */}
+            {!editing && row && (
+              <div style={{
+                display: 'flex', alignItems: 'center', gap: 20, flexWrap: 'wrap',
+                paddingBottom: 24, borderBottom: '1px solid rgba(122,145,165,0.15)',
+              }}>
+                <span style={{
+                  fontFamily: 'var(--font-display)', fontWeight: 300,
+                  fontSize: '2.5rem', color: 'var(--hh-dark)', lineHeight: 1,
+                }}>
+                  {row.total_score}<span style={{ fontSize: '1.25rem', color: 'var(--hh-haze)' }}>/{MAX_TOTAL}</span>
+                </span>
+                <span style={{
+                  display: 'inline-flex', alignItems: 'center', gap: 5,
+                  padding: '5px 14px', borderRadius: 99, fontFamily: 'var(--font-body)',
+                  fontWeight: 500, fontSize: '0.8125rem',
+                  background: row.pass ? 'rgba(74,155,142,0.12)' : 'rgba(220,53,69,0.1)',
+                  color: row.pass ? 'var(--hh-teal)' : '#dc3545',
+                }}>
+                  {row.pass ? 'Aprobado ✓' : 'No aprobado'}
+                </span>
+                <span style={{ fontFamily: 'var(--font-body)', fontWeight: 300, fontSize: '0.8125rem', color: 'var(--hh-haze)' }}>
+                  {formatDate(row.assessed_at)}{row.assessed_by ? ` · ${row.assessed_by}` : ''}
+                </span>
+              </div>
+            )}
+
+            {/* Questions */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
+              {HST_QUESTIONS.map((q, idx) => {
+                const selected = editing ? draft[q.key] : row?.answers?.[q.key]
+                return (
+                  <div key={q.key}>
+                    <p style={{
+                      fontFamily: 'var(--font-body)', fontWeight: 500,
+                      fontSize: '0.875rem', color: 'var(--hh-dark)',
+                      margin: '0 0 10px',
+                    }}>
+                      <span style={{ color: 'var(--hh-haze)', marginRight: 8, fontWeight: 300 }}>
+                        {idx + 1}.
+                      </span>
+                      {q.text}
+                      <span style={{ color: 'var(--hh-haze)', fontWeight: 300, marginLeft: 8, fontSize: '0.75rem' }}>
+                        (máx. {q.maxScore} pts)
+                      </span>
+                    </p>
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px 16px' }}>
+                      {q.options.map(opt => {
+                        const isSelected = selected === opt.label
+                        return editing ? (
+                          <label key={opt.label} style={{
+                            display: 'flex', alignItems: 'center', gap: 7,
+                            cursor: 'pointer',
+                            fontFamily: 'var(--font-body)', fontSize: '0.875rem',
+                            color: isSelected ? 'var(--hh-teal)' : 'var(--hh-dark)',
+                            fontWeight: isSelected ? 500 : 400,
+                            padding: '6px 12px',
+                            borderRadius: 6,
+                            background: isSelected ? 'rgba(74,155,142,0.08)' : 'transparent',
+                            border: `1px solid ${isSelected ? 'rgba(74,155,142,0.35)' : 'rgba(122,145,165,0.2)'}`,
+                            transition: 'all 0.1s',
+                          }}>
+                            <input
+                              type="radio"
+                              name={q.key}
+                              value={opt.label}
+                              checked={isSelected}
+                              onChange={() => setDraft(d => ({ ...d, [q.key]: opt.label }))}
+                              style={{ accentColor: 'var(--hh-teal)', width: 15, height: 15, flexShrink: 0 }}
+                            />
+                            {opt.label}
+                            <span style={{ color: 'var(--hh-haze)', fontSize: '0.75rem', fontWeight: 300 }}>
+                              {opt.score} pt{opt.score !== 1 ? 's' : ''}
+                            </span>
+                          </label>
+                        ) : (
+                          isSelected ? (
+                            <span key={opt.label} style={{
+                              display: 'inline-block', padding: '4px 12px', borderRadius: 99,
+                              fontFamily: 'var(--font-body)', fontSize: '0.875rem',
+                              background: 'rgba(74,155,142,0.08)',
+                              color: 'var(--hh-teal)', fontWeight: 500,
+                              border: '1px solid rgba(74,155,142,0.25)',
+                            }}>
+                              {opt.label}
+                            </span>
+                          ) : null
+                        )
+                      })}
+                      {!editing && !selected && (
+                        <span style={{ fontFamily: 'var(--font-body)', fontSize: '0.875rem', color: 'var(--hh-haze)', fontWeight: 300 }}>—</span>
+                      )}
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+
+            {/* Live score preview during edit */}
+            {editing && (
+              <div style={{
+                display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                flexWrap: 'wrap', gap: 12,
+                padding: '16px 20px',
+                background: 'var(--hh-ice)',
+                borderRadius: 8,
+                border: '1px solid rgba(122,145,165,0.2)',
+              }}>
+                <div style={{ display: 'flex', alignItems: 'baseline', gap: 12 }}>
+                  <span style={{ fontFamily: 'var(--font-body)', fontWeight: 400, fontSize: '0.875rem', color: 'var(--hh-haze)' }}>
+                    Puntaje actual:
+                  </span>
+                  <span style={{
+                    fontFamily: 'var(--font-display)', fontWeight: 300, fontSize: '1.5rem',
+                    color: liveScore >= 30 ? 'var(--hh-teal)' : 'var(--hh-dark)',
+                  }}>
+                    {liveScore}<span style={{ fontSize: '0.875rem', color: 'var(--hh-haze)' }}>/{MAX_TOTAL}</span>
+                  </span>
+                  {liveScore >= 30 && (
+                    <span style={{
+                      fontFamily: 'var(--font-body)', fontWeight: 500, fontSize: '0.75rem',
+                      color: 'var(--hh-teal)', background: 'rgba(74,155,142,0.1)',
+                      padding: '2px 10px', borderRadius: 99,
+                    }}>
+                      Aprobado ✓
+                    </span>
+                  )}
+                </div>
+                <span style={{ fontFamily: 'var(--font-body)', fontWeight: 300, fontSize: '0.8125rem', color: 'var(--hh-haze)' }}>
+                  {answeredCount}/{HST_QUESTIONS.length} preguntas respondidas
+                </span>
+              </div>
+            )}
+
+          </div>
+        )}
+      </SectionCard>
     </>
   )
 }
