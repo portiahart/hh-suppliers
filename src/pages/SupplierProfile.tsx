@@ -112,7 +112,7 @@ export function SupplierProfile() {
       ) : activeTab === 'Legal' ? (
         <LegalTab supplier={supplier} supplierId={id ?? null} />
       ) : activeTab === 'Bancario' ? (
-        <BancarioTab supplierId={id ?? null} supplierName={supplier?.name ?? null} />
+        <BancarioTab supplierId={id ?? null} nit={supplier?.nit ?? null} />
       ) : activeTab === 'Documentos' ? (
         <DocumentosTab supplierId={id ?? null} />
       ) : activeTab === 'Evaluación' ? (
@@ -842,7 +842,7 @@ function maskAccount(num: string): string {
   return '•••• •••• ' + num.slice(-4)
 }
 
-function BancarioTab({ supplierId, supplierName }: { supplierId: string | null; supplierName: string | null }) {
+function BancarioTab({ supplierId, nit }: { supplierId: string | null; nit: string | null }) {
   const { session } = useAuth()
   const [data, setData] = useState<BankingData | null>(null)
   const [loading, setLoading] = useState(true)
@@ -892,28 +892,30 @@ function BancarioTab({ supplierId, supplierName }: { supplierId: string | null; 
   }
 
   const syncFromSheet = async () => {
-    if (!supplierName) { showToast('Sin nombre de proveedor para buscar en hoja.'); return }
+    if (!nit) { showToast('Sin NIT para buscar en hoja.'); return }
     setSyncing(true)
     try {
       const { data: res, error } = await supabase.functions.invoke('get-reporte-data', {
-        body: { ranges: ['NAME'] },
+        body: { ranges: ['NIT', 'MAIN'] },
       })
       if (error || !res?.success) throw new Error(error?.message ?? res?.error ?? 'Error al leer hoja')
-      const rows: unknown[][] = res.ranges?.NAME ?? []
-      // Row 0 is header; data starts at row 1
-      const match = rows.slice(1).find(row => {
-        const cell = (row as unknown[])[0]
-        return typeof cell === 'string' && cell.trim().toLowerCase() === supplierName.trim().toLowerCase()
-      }) as unknown[] | undefined
-      if (!match) { showToast('Proveedor no encontrado en la hoja.'); setSyncing(false); return }
+      const nitRows: unknown[][] = res.ranges?.NIT ?? []
+      const mainRows: unknown[][] = res.ranges?.MAIN ?? []
+      // Both ranges are row-aligned; row 0 is header
+      const normalizeNit = (v: unknown) => String(v ?? '').replace(/\D/g, '')
+      const targetNit = normalizeNit(nit)
+      const rowIdx = nitRows.findIndex((row, i) => i > 0 && normalizeNit((row as unknown[])[0]) === targetNit)
+      if (rowIdx === -1) { showToast('NIT no encontrado en la hoja.'); setSyncing(false); return }
+      const match = mainRows[rowIdx] as unknown[] | undefined
+      if (!match) { showToast('Fila de datos bancarios no encontrada.'); setSyncing(false); return }
       const cell = (i: number) => { const v = match[i]; return typeof v === 'string' && v.trim() ? v.trim() : null }
       const sheetDraft: BankingDraft = {
-        nombre_beneficiario: cell(13),
-        numero_cuenta:        cell(14),
-        tipo_cuenta:          cell(15),
-        banco:                cell(16),
-        tipo_documento_bancolombia: cell(17),
-        verificacion_notas:   data?.verificacion_notas ?? null,
+        nombre_beneficiario:        cell(0),
+        numero_cuenta:              cell(1),
+        tipo_cuenta:                cell(2),
+        banco:                      cell(3),
+        tipo_documento_bancolombia: cell(4),
+        verificacion_notas:         data?.verificacion_notas ?? null,
       }
       setDraft(sheetDraft)
       setEditing(true)
