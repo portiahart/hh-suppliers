@@ -1,6 +1,7 @@
 import { useState, useEffect, Fragment } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
-import { ArrowLeftIcon, Pencil1Icon } from '@radix-ui/react-icons'
+import { ArrowLeftIcon, Pencil1Icon, EyeOpenIcon, EyeClosedIcon, CheckCircledIcon } from '@radix-ui/react-icons'
+import { useAuth } from '../context/AuthContext'
 import { supabase } from '../lib/supabase'
 import type { Supplier } from '../types/supplier'
 
@@ -110,6 +111,8 @@ export function SupplierProfile() {
         <ResumenTab supplier={supplier} loading={loading} onUpdate={setSupplier} />
       ) : activeTab === 'Legal' ? (
         <LegalTab supplier={supplier} supplierId={id ?? null} />
+      ) : activeTab === 'Bancario' ? (
+        <BancarioTab supplierId={id ?? null} />
       ) : activeTab === 'Gasto' ? (
         <GastoTab supplierId={id ?? null} />
       ) : (
@@ -796,6 +799,341 @@ function RetencionesCard({ supplierId, showToast }: { supplierId: string | null;
         </button>
       )}
     </SectionCard>
+  )
+}
+
+/* ─── Bancario Tab ───────────────────────────────────────── */
+
+const COLOMBIAN_BANKS = [
+  'Bancolombia', 'Banco de Bogotá', 'Davivienda', 'BBVA', 'Banco Popular',
+  'Banco Agrario', 'Colpatria', 'Helm Bank', 'Scotiabank Colpatria',
+  'Caja Social', 'Banco Falabella', 'Nequi', 'Daviplata', 'Otro',
+]
+
+interface BankingData {
+  id: string
+  supplier_id: string
+  nombre_beneficiario: string | null
+  banco: string | null
+  tipo_cuenta: string | null
+  numero_cuenta: string | null
+  tipo_documento_bancolombia: string | null
+  verificacion_notas: string | null
+  verificado_at: string | null
+  verificado_por: string | null
+}
+
+type BankingDraft = Omit<BankingData, 'id' | 'supplier_id' | 'verificado_at' | 'verificado_por'>
+
+function maskAccount(num: string): string {
+  if (num.length <= 4) return num
+  return '•••• •••• ' + num.slice(-4)
+}
+
+function BancarioTab({ supplierId }: { supplierId: string | null }) {
+  const { session } = useAuth()
+  const [data, setData] = useState<BankingData | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [editing, setEditing] = useState(false)
+  const [saving, setSaving] = useState(false)
+  const [verifying, setVerifying] = useState(false)
+  const [revealed, setRevealed] = useState(false)
+  const [toast, setToast] = useState<string | null>(null)
+  const [draft, setDraft] = useState<BankingDraft>({
+    nombre_beneficiario: null, banco: null, tipo_cuenta: null,
+    numero_cuenta: null, tipo_documento_bancolombia: null, verificacion_notas: null,
+  })
+
+  const showToast = (msg: string) => {
+    setToast(msg)
+    setTimeout(() => setToast(null), 3500)
+  }
+
+  useEffect(() => {
+    if (!supplierId) return
+    void (async () => {
+      const { data: row } = await supabase
+        .from('suppliers_banking')
+        .select('*')
+        .eq('supplier_id', supplierId)
+        .maybeSingle()
+      setData((row as BankingData) ?? null)
+      setLoading(false)
+    })()
+  }, [supplierId])
+
+  const startEdit = () => {
+    setDraft({
+      nombre_beneficiario: data?.nombre_beneficiario ?? null,
+      banco: data?.banco ?? null,
+      tipo_cuenta: data?.tipo_cuenta ?? null,
+      numero_cuenta: data?.numero_cuenta ?? null,
+      tipo_documento_bancolombia: data?.tipo_documento_bancolombia ?? null,
+      verificacion_notas: data?.verificacion_notas ?? null,
+    })
+    setEditing(true)
+  }
+
+  const cancelEdit = () => {
+    setEditing(false)
+  }
+
+  const saveEdit = async () => {
+    if (!supplierId) return
+    setSaving(true)
+    const payload = { ...draft, supplier_id: supplierId, updated_at: new Date().toISOString() }
+    if (data?.id) {
+      const { data: row, error } = await supabase
+        .from('suppliers_banking').update(payload).eq('id', data.id).select().single()
+      setSaving(false)
+      if (error) { showToast('Error al guardar los cambios.'); return }
+      setData(row as BankingData)
+    } else {
+      const { data: row, error } = await supabase
+        .from('suppliers_banking').insert(payload).select().single()
+      setSaving(false)
+      if (error) { showToast('Error al guardar los cambios.'); return }
+      setData(row as BankingData)
+    }
+    setEditing(false)
+    showToast('Cambios guardados.')
+  }
+
+  const markVerified = async () => {
+    if (!supplierId || !data?.id || !session?.user) return
+    setVerifying(true)
+    const { data: row, error } = await supabase
+      .from('suppliers_banking')
+      .update({ verificado_at: new Date().toISOString(), verificado_por: session.user.email })
+      .eq('id', data.id)
+      .select()
+      .single()
+    setVerifying(false)
+    if (error) { showToast('Error al verificar.'); return }
+    setData(row as BankingData)
+    showToast('Datos bancarios verificados.')
+  }
+
+  /* ── Verification status banner ── */
+  const VerificationBanner = () => {
+    if (loading) return null
+    if (!data) {
+      return (
+        <div style={{
+          display: 'flex', alignItems: 'center', gap: 10,
+          background: 'rgba(122,145,165,0.08)', border: '1px solid rgba(122,145,165,0.2)',
+          borderRadius: 8, padding: '14px 20px',
+        }}>
+          <span style={{ width: 10, height: 10, borderRadius: '50%', background: 'var(--hh-haze)', flexShrink: 0 }} />
+          <span style={{ fontFamily: 'var(--font-body)', fontSize: '0.8125rem', color: 'var(--hh-haze)' }}>
+            Sin datos bancarios
+          </span>
+        </div>
+      )
+    }
+    if (data.verificado_at) {
+      const date = new Date(data.verificado_at).toLocaleDateString('es-CO', { day: 'numeric', month: 'long', year: 'numeric' })
+      return (
+        <div style={{
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 12,
+          background: 'rgba(74,155,142,0.07)', border: '1px solid rgba(74,155,142,0.25)',
+          borderRadius: 8, padding: '14px 20px',
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <CheckCircledIcon width={18} height={18} style={{ color: 'var(--hh-teal)', flexShrink: 0 }} />
+            <div>
+              <span style={{ fontFamily: 'var(--font-body)', fontSize: '0.8125rem', fontWeight: 500, color: 'var(--hh-teal)' }}>
+                Verificado
+              </span>
+              <span style={{ fontFamily: 'var(--font-body)', fontSize: '0.8125rem', color: 'var(--hh-haze)', marginLeft: 10 }}>
+                {date} · {data.verificado_por}
+              </span>
+            </div>
+          </div>
+        </div>
+      )
+    }
+    return (
+      <div style={{
+        display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 12,
+        background: 'rgba(255,208,0,0.08)', border: '1px solid rgba(255,208,0,0.4)',
+        borderRadius: 8, padding: '14px 20px',
+      }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          <span style={{ width: 10, height: 10, borderRadius: '50%', background: 'var(--hh-lemon)', flexShrink: 0 }} />
+          <span style={{ fontFamily: 'var(--font-body)', fontSize: '0.8125rem', fontWeight: 500, color: 'var(--hh-dark)' }}>
+            Pendiente verificación
+          </span>
+        </div>
+        <button onClick={markVerified} disabled={verifying} style={primaryBtnStyle}>
+          {verifying ? 'Verificando…' : 'Marcar como verificado'}
+        </button>
+      </div>
+    )
+  }
+
+  const numCuenta = editing ? (draft.numero_cuenta ?? '') : (data?.numero_cuenta ?? '')
+
+  return (
+    <>
+      {toast && (
+        <div style={{
+          position: 'fixed', bottom: 28, right: 28,
+          background: 'var(--hh-dark)', color: 'var(--hh-ice)',
+          fontFamily: 'var(--font-body)', fontSize: '0.8125rem',
+          padding: '12px 20px', borderRadius: 6, zIndex: 100,
+          boxShadow: '0 4px 16px rgba(0,0,0,0.15)',
+        }}>
+          {toast}
+        </div>
+      )}
+
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+        <VerificationBanner />
+
+        <SectionCard
+          title="Datos Bancarios"
+          action={
+            !editing ? (
+              <button onClick={startEdit} style={ghostBtnStyle}>
+                <Pencil1Icon width={14} height={14} />
+                {data ? 'Editar' : 'Agregar'}
+              </button>
+            ) : (
+              <div style={{ display: 'flex', gap: 8 }}>
+                <button onClick={cancelEdit} style={ghostBtnStyle}>Cancelar</button>
+                <button onClick={saveEdit} disabled={saving} style={primaryBtnStyle}>
+                  {saving ? 'Guardando…' : 'Guardar'}
+                </button>
+              </div>
+            )
+          }
+        >
+          {loading ? (
+            <SkeletonFields />
+          ) : (
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: '20px 32px' }}>
+
+              <Field
+                label="Nombre Beneficiario"
+                value={editing ? (draft.nombre_beneficiario ?? '') : (data?.nombre_beneficiario ?? null)}
+                editing={editing}
+                onChange={v => setDraft(d => ({ ...d, nombre_beneficiario: v || null }))}
+              />
+
+              {/* Banco */}
+              <div>
+                <p style={labelStyle}>Banco</p>
+                {editing ? (
+                  <select
+                    value={draft.banco ?? ''}
+                    onChange={e => setDraft(d => ({ ...d, banco: e.target.value || null }))}
+                    style={inputStyle}
+                  >
+                    <option value="">—</option>
+                    {COLOMBIAN_BANKS.map(b => <option key={b} value={b}>{b}</option>)}
+                  </select>
+                ) : (
+                  <p style={valueStyle}>{data?.banco || <Muted>—</Muted>}</p>
+                )}
+              </div>
+
+              {/* Tipo de Cuenta */}
+              <div>
+                <p style={labelStyle}>Tipo de Cuenta</p>
+                {editing ? (
+                  <select
+                    value={draft.tipo_cuenta ?? ''}
+                    onChange={e => setDraft(d => ({ ...d, tipo_cuenta: e.target.value || null }))}
+                    style={inputStyle}
+                  >
+                    <option value="">—</option>
+                    <option value="Ahorros">Ahorros</option>
+                    <option value="Corriente">Corriente</option>
+                  </select>
+                ) : (
+                  <p style={valueStyle}>{data?.tipo_cuenta || <Muted>—</Muted>}</p>
+                )}
+              </div>
+
+              {/* Número de Cuenta — masked with reveal toggle */}
+              <div>
+                <p style={labelStyle}>Número de Cuenta</p>
+                {editing ? (
+                  <input
+                    type="text"
+                    value={draft.numero_cuenta ?? ''}
+                    onChange={e => setDraft(d => ({ ...d, numero_cuenta: e.target.value || null }))}
+                    style={inputStyle}
+                  />
+                ) : (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <p style={{ ...valueStyle, margin: 0, fontVariantNumeric: 'tabular-nums' }}>
+                      {numCuenta
+                        ? (revealed ? numCuenta : <span style={{ color: 'var(--hh-haze)' }}>{maskAccount(numCuenta)}</span>)
+                        : <Muted>—</Muted>}
+                    </p>
+                    {numCuenta && (
+                      <button
+                        onClick={() => setRevealed(r => !r)}
+                        style={{ background: 'none', border: 'none', padding: 2, cursor: 'pointer', color: 'var(--hh-haze)', display: 'flex' }}
+                      >
+                        {revealed ? <EyeClosedIcon width={15} height={15} /> : <EyeOpenIcon width={15} height={15} />}
+                      </button>
+                    )}
+                  </div>
+                )}
+              </div>
+
+              {/* Tipo Documento Bancolombia */}
+              <div>
+                <p style={labelStyle}>Tipo Documento Bancolombia</p>
+                {editing ? (
+                  <select
+                    value={draft.tipo_documento_bancolombia ?? ''}
+                    onChange={e => setDraft(d => ({ ...d, tipo_documento_bancolombia: e.target.value || null }))}
+                    style={inputStyle}
+                  >
+                    <option value="">—</option>
+                    <option value="NIT">NIT</option>
+                    <option value="CC">CC</option>
+                    <option value="CE">CE</option>
+                  </select>
+                ) : (
+                  <p style={valueStyle}>{data?.tipo_documento_bancolombia || <Muted>—</Muted>}</p>
+                )}
+              </div>
+
+              {/* Verificación — staff-only note */}
+              <div style={{ gridColumn: 'span 2' }}>
+                <p style={{ ...labelStyle, display: 'flex', alignItems: 'center', gap: 6 }}>
+                  Verificación
+                  <span style={{
+                    background: 'var(--hh-lemon)', color: 'var(--hh-dark)',
+                    fontSize: '0.6rem', fontWeight: 600, letterSpacing: '0.08em',
+                    padding: '1px 6px', borderRadius: 99, textTransform: 'uppercase',
+                  }}>
+                    Solo staff
+                  </span>
+                </p>
+                {editing ? (
+                  <input
+                    type="text"
+                    value={draft.verificacion_notas ?? ''}
+                    onChange={e => setDraft(d => ({ ...d, verificacion_notas: e.target.value || null }))}
+                    placeholder="Notas internas sobre la verificación…"
+                    style={inputStyle}
+                  />
+                ) : (
+                  <p style={valueStyle}>{data?.verificacion_notas || <Muted>—</Muted>}</p>
+                )}
+              </div>
+
+            </div>
+          )}
+        </SectionCard>
+      </div>
+    </>
   )
 }
 
