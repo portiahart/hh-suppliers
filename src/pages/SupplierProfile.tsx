@@ -1739,9 +1739,6 @@ function EvaluacionTab({ supplierId }: { supplierId: string | null }) {
                         {idx + 1}.
                       </span>
                       {q.text}
-                      <span style={{ color: 'var(--hh-haze)', fontWeight: 300, marginLeft: 8, fontSize: '0.75rem' }}>
-                        (máx. {q.maxScore} pts)
-                      </span>
                     </p>
                     <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px 16px' }}>
                       {q.options.map(opt => {
@@ -1768,9 +1765,6 @@ function EvaluacionTab({ supplierId }: { supplierId: string | null }) {
                               style={{ accentColor: 'var(--hh-teal)', width: 15, height: 15, flexShrink: 0 }}
                             />
                             {opt.label}
-                            <span style={{ color: 'var(--hh-haze)', fontSize: '0.75rem', fontWeight: 300 }}>
-                              {opt.score} pt{opt.score !== 1 ? 's' : ''}
-                            </span>
                           </label>
                         ) : (
                           isSelected ? (
