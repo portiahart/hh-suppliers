@@ -70,8 +70,8 @@ Extract the following fields and return ONLY a valid JSON object with these exac
   "pais": "Country name (usually Colombia)",
   "email": "Email address if present",
   "telefono": "Phone number — always prefix with +57 if Colombian, digits only after that (e.g. +573001234567)",
-  "rep_legal_nombre": "Full name of the legal representative (representante legal) if present",
-  "rep_legal_documento": "ID document number of the legal representative if present"
+  "rep_legal_nombre": "Full name of the principal legal representative only (REPRS LEGAL PRIN, code 18) — ignore any suplente (REPRS LEGAL SUPL, code 19). The RUT stores names in Colombian order: field 104=primer apellido, 105=segundo apellido, 106=primer nombre, 107=otros nombres. Reorder to Western display order: [primer nombre] [otros nombres] [primer apellido] [segundo apellido], omitting blank fields. Example: apellido=HART, segundo apellido=(empty), nombre=PORTIA, otros=ISABELLE → 'Portia Isabelle Hart'",
+  "rep_legal_documento": "ID document number of the principal legal representative (REPRS LEGAL PRIN only, field 101)"
 }
 
 Return only the JSON object, no explanation or markdown.`
