@@ -1026,11 +1026,12 @@ function DocumentosTab({ supplierId, onExtract }: { supplierId: string | null; o
 
   const fetchDocs = async () => {
     if (!supplierId) return
-    const { data } = await supabase
+    const { data, error } = await supabase
       .from('suppliers_documents')
       .select('*')
       .eq('supplier_id', supplierId)
       .order('created_at', { ascending: false })
+    if (error) showToast(`Error al cargar documentos: ${error.message}`)
     setDocs((data as DocRow[]) ?? [])
     setLoading(false)
   }
@@ -1211,7 +1212,7 @@ function DocumentosTab({ supplierId, onExtract }: { supplierId: string | null; o
                       </p>
                     </div>
                     <div style={{ display: 'flex', gap: 8, flexShrink: 0 }}>
-                      {onExtract && (doc.document_type === 'RUT' || doc.document_type === 'Cámara de Comercio') && doc.mime_type === 'application/pdf' && (
+                      {onExtract && (doc.document_type === 'RUT' || doc.document_type === 'Cámara de Comercio') && (
                         <button
                           onClick={() => handleExtract(doc)}
                           disabled={extractingId === doc.id}
