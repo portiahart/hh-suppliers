@@ -1124,8 +1124,6 @@ function DocumentosTab({ supplierId, onExtract }: { supplierId: string | null; o
     return `${(b / (1024 * 1024)).toFixed(1)} MB`
   }
 
-  const formatDate = (iso: string) =>
-    new Date(iso).toLocaleDateString('es-CO', { day: 'numeric', month: 'short', year: 'numeric' })
 
   // Group by document_type, preserving predefined order
   const grouped = DOC_TYPES.reduce<Record<string, DocRow[]>>((acc, t) => {
