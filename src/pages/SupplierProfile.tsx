@@ -1,6 +1,6 @@
 import { useState, useEffect, Fragment } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
-import { ArrowLeftIcon, Pencil1Icon, EyeOpenIcon, EyeClosedIcon, CheckCircledIcon, DownloadIcon } from '@radix-ui/react-icons'
+import { ArrowLeftIcon, Pencil1Icon, CheckCircledIcon, DownloadIcon } from '@radix-ui/react-icons'
 import { useAuth } from '../context/AuthContext'
 import { supabase } from '../lib/supabase'
 import type { Supplier } from '../types/supplier'
@@ -135,20 +135,338 @@ interface ExtractedFields {
   pais:              string | null
 }
 
+/* ─── Acceso Card ─────────────────────────────────────────── */
+
+function AccesoCard({ supplier }: { supplier: Supplier | null }) {
+  const [toast, setToast] = useState<string | null>(null)
+  const showToast = (msg: string) => { setToast(msg); setTimeout(() => setToast(null), 3500) }
+  return (
+    <>
+      {toast && (
+        <div style={{
+          position: 'fixed', bottom: 28, right: 28,
+          background: 'var(--hh-dark)', color: 'var(--hh-ice)',
+          fontFamily: 'var(--font-body)', fontSize: '0.8125rem',
+          padding: '12px 20px', borderRadius: 6, zIndex: 100,
+          boxShadow: '0 4px 16px rgba(0,0,0,0.15)',
+        }}>{toast}</div>
+      )}
+      <SectionCard title="Acceso del proveedor">
+        <div style={{ maxWidth: 360 }}>
+          <p style={labelStyle}>Email del proveedor</p>
+          <p style={{ ...valueStyle, marginBottom: 20 }}>
+            {supplier?.email ?? <Muted>Sin email registrado</Muted>}
+          </p>
+          <button
+            onClick={() => showToast('Funcionalidad próximamente')}
+            style={{ ...primaryBtnStyle, width: '100%', justifyContent: 'center', padding: '11px 20px', fontSize: '0.875rem' }}
+          >
+            Enviar enlace de acceso
+          </button>
+          <p style={{ marginTop: 10, fontSize: '0.75rem', color: 'var(--hh-haze)', fontWeight: 300, lineHeight: 1.5 }}>
+            El proveedor recibirá un enlace mágico para acceder a su perfil.
+          </p>
+        </div>
+      </SectionCard>
+    </>
+  )
+}
+
+/* ─── IdentidadLegal Card (merged) ───────────────────────── */
+
+interface IdentidadLegalDraft {
+  razon_social: string
+  nombre_operativo: string
+  nit: string
+  documento_tipo: string
+  tipo_persona: string
+  email: string
+  telefono: string
+  status: Supplier['status']
+  codigo_tributario: string | null
+  ciiu: string | null
+  direccion: string | null
+  ciudad: string | null
+  pais: string | null
+  proximity_zone: string | null
+}
+
+function IdentidadLegalCard({ supplier, loading, supplierId, onUpdate, prefill, onPrefillConsumed }: {
+  supplier: Supplier | null
+  loading: boolean
+  supplierId: string | null
+  onUpdate: (s: Supplier) => void
+  prefill?: ExtractedFields | null
+  onPrefillConsumed?: () => void
+}) {
+  const [legalData, setLegalData] = useState<LegalData | null>(null)
+  const [editing, setEditing] = useState(false)
+  const [saving, setSaving] = useState(false)
+  const [toast, setToast] = useState<string | null>(null)
+  const [draft, setDraft] = useState<IdentidadLegalDraft>({
+    razon_social: '', nombre_operativo: '', nit: '', documento_tipo: '',
+    tipo_persona: '', email: '', telefono: '', status: 'ACTIVE',
+    codigo_tributario: null, ciiu: null, direccion: null, ciudad: null,
+    pais: 'Colombia', proximity_zone: null,
+  })
+
+  const showToast = (msg: string) => { setToast(msg); setTimeout(() => setToast(null), 3500) }
+
+  useEffect(() => {
+    if (!supplierId) return
+    void (async () => {
+      const { data } = await supabase
+        .from('suppliers_legal')
+        .select('*')
+        .eq('supplier_id', supplierId)
+        .maybeSingle()
+      setLegalData((data as LegalData) ?? null)
+    })()
+  }, [supplierId])
+
+  useEffect(() => {
+    if (!prefill) return
+    setDraft(d => {
+      const ciudad = prefill.ciudad ?? d.ciudad ?? legalData?.ciudad ?? null
+      return {
+        ...d,
+        razon_social:      prefill.razon_social      ?? d.razon_social      ?? supplier?.razon_social      ?? '',
+        nit:               prefill.nit               ?? d.nit               ?? supplier?.nit               ?? '',
+        tipo_persona:      prefill.tipo_persona      ?? d.tipo_persona      ?? supplier?.tipo_persona      ?? '',
+        codigo_tributario: prefill.codigo_tributario ?? d.codigo_tributario ?? legalData?.codigo_tributario ?? null,
+        ciiu:              prefill.ciiu              ?? d.ciiu              ?? legalData?.ciiu              ?? null,
+        direccion:         prefill.direccion         ?? d.direccion         ?? legalData?.direccion         ?? null,
+        ciudad,
+        pais:              prefill.pais              ?? d.pais              ?? legalData?.pais              ?? 'Colombia',
+        proximity_zone:    ciudad ? computeZone(ciudad) : d.proximity_zone ?? legalData?.proximity_zone ?? null,
+      }
+    })
+    setEditing(true)
+    onPrefillConsumed?.()
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [prefill])
+
+  const startEdit = () => {
+    if (!supplier) return
+    const ciudad = legalData?.ciudad ?? null
+    setDraft({
+      razon_social:      supplier.razon_social      ?? '',
+      nombre_operativo:  supplier.nombre_operativo  ?? '',
+      nit:               supplier.nit               ?? '',
+      documento_tipo:    supplier.documento_tipo     ?? '',
+      tipo_persona:      supplier.tipo_persona       ?? '',
+      email:             supplier.email              ?? '',
+      telefono:          supplier.telefono           ?? '',
+      status:            supplier.status,
+      codigo_tributario: legalData?.codigo_tributario ?? null,
+      ciiu:              legalData?.ciiu              ?? null,
+      direccion:         legalData?.direccion         ?? null,
+      ciudad,
+      pais:              legalData?.pais              ?? 'Colombia',
+      proximity_zone:    legalData?.proximity_zone    ?? null,
+    })
+    setEditing(true)
+  }
+
+  const cancelEdit = () => setEditing(false)
+
+  const setField = <K extends keyof IdentidadLegalDraft>(key: K, value: IdentidadLegalDraft[K]) => {
+    setDraft(d => {
+      const next = { ...d, [key]: value }
+      if (key === 'ciudad') next.proximity_zone = computeZone(String(value ?? '')) || null
+      return next
+    })
+  }
+
+  const saveEdit = async () => {
+    if (!supplierId || !supplier) return
+    setSaving(true)
+    const { codigo_tributario, ciiu, direccion, ciudad, pais, proximity_zone,
+            razon_social, nombre_operativo, nit, documento_tipo, tipo_persona, email, telefono, status } = draft
+
+    // Save supplier fields
+    const { data: updatedSupplier, error: suppErr } = await supabase
+      .from('accounts_suppliers')
+      .update({ razon_social, nombre_operativo, nit, documento_tipo, tipo_persona, email, telefono, status, updated_at: new Date().toISOString() })
+      .eq('id', supplierId)
+      .select()
+      .single()
+    if (suppErr) { setSaving(false); showToast('Error al guardar.'); return }
+
+    // Save legal fields
+    const legalPayload = { supplier_id: supplierId, codigo_tributario, ciiu, direccion, ciudad, pais, proximity_zone, updated_at: new Date().toISOString() }
+    if (legalData?.id) {
+      const { data: ld, error: lErr } = await supabase.from('suppliers_legal').update(legalPayload).eq('id', legalData.id).select().single()
+      if (lErr) { setSaving(false); showToast('Error al guardar datos legales.'); return }
+      setLegalData(ld as LegalData)
+    } else {
+      const { data: ld, error: lErr } = await supabase.from('suppliers_legal').insert(legalPayload).select().single()
+      if (lErr) { setSaving(false); showToast('Error al guardar datos legales.'); return }
+      setLegalData(ld as LegalData)
+    }
+
+    onUpdate(updatedSupplier as Supplier)
+    setSaving(false)
+    setEditing(false)
+    showToast('Cambios guardados.')
+  }
+
+  const zone = editing ? (draft.proximity_zone ?? '') : (legalData?.proximity_zone ?? '')
+  const zoneColor = zone ? ZONE_COLORS[zone] : null
+
+  return (
+    <>
+      {toast && (
+        <div style={{
+          position: 'fixed', bottom: 28, right: 28,
+          background: 'var(--hh-dark)', color: 'var(--hh-ice)',
+          fontFamily: 'var(--font-body)', fontSize: '0.8125rem',
+          padding: '12px 20px', borderRadius: 6, zIndex: 100,
+          boxShadow: '0 4px 16px rgba(0,0,0,0.15)',
+        }}>{toast}</div>
+      )}
+      <SectionCard
+        title="Identidad y Legal"
+        action={
+          !editing ? (
+            <button onClick={startEdit} style={ghostBtnStyle}>
+              <Pencil1Icon width={14} height={14} />
+              Editar
+            </button>
+          ) : (
+            <div style={{ display: 'flex', gap: 8 }}>
+              <button onClick={cancelEdit} style={ghostBtnStyle}>Cancelar</button>
+              <button onClick={saveEdit} disabled={saving} style={primaryBtnStyle}>
+                {saving ? 'Guardando…' : 'Guardar'}
+              </button>
+            </div>
+          )
+        }
+      >
+        {loading ? (
+          <SkeletonFields />
+        ) : (
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: '20px 32px' }}>
+            <Field label="Razón Social"
+              value={editing ? draft.razon_social : (supplier?.razon_social ?? null)}
+              editing={editing} onChange={v => setField('razon_social', v)} />
+            <Field label="Nombre Operativo"
+              value={editing ? draft.nombre_operativo : (supplier?.nombre_operativo ?? null)}
+              editing={editing} onChange={v => setField('nombre_operativo', v)} />
+            <Field label="NIT"
+              value={editing ? draft.nit : (supplier?.nit ?? null)}
+              editing={editing} onChange={v => setField('nit', v)} />
+            <Field label="Tipo de Documento"
+              value={editing ? draft.documento_tipo : (supplier?.documento_tipo ?? null)}
+              editing={editing} onChange={v => setField('documento_tipo', v)} />
+            <div>
+              <p style={labelStyle}>Tipo de Persona</p>
+              {editing ? (
+                <select value={draft.tipo_persona} onChange={e => setField('tipo_persona', e.target.value)} style={inputStyle}>
+                  <option value="">—</option>
+                  <option value="JURIDICA">JURIDICA</option>
+                  <option value="NATURAL">NATURAL</option>
+                </select>
+              ) : (
+                <p style={valueStyle}>{supplier?.tipo_persona || <Muted>—</Muted>}</p>
+              )}
+            </div>
+            <Field label="Email"
+              value={editing ? draft.email : (supplier?.email ?? null)}
+              editing={editing} onChange={v => setField('email', v)} />
+            <Field label="Teléfono"
+              value={editing ? draft.telefono : (supplier?.telefono ?? null)}
+              editing={editing} onChange={v => setField('telefono', v)} />
+            <div>
+              <p style={labelStyle}>Estado</p>
+              {editing ? (
+                <select value={draft.status ?? ''} onChange={e => setField('status', e.target.value as Supplier['status'])} style={inputStyle}>
+                  <option value="">—</option>
+                  <option value="ACTIVE">ACTIVE</option>
+                  <option value="INACTIVE">INACTIVE</option>
+                </select>
+              ) : (
+                <p style={valueStyle}>{supplier?.status ? <StatusBadge status={supplier.status} /> : <Muted>—</Muted>}</p>
+              )}
+            </div>
+            <Field label="Código Tributario"
+              value={editing ? (draft.codigo_tributario ?? '') : (legalData?.codigo_tributario ?? null)}
+              editing={editing} onChange={v => setField('codigo_tributario', v || null)} />
+            <Field label="CIIU"
+              value={editing ? (draft.ciiu ?? '') : (legalData?.ciiu ?? null)}
+              editing={editing} onChange={v => setField('ciiu', v || null)} />
+            <Field label="Dirección"
+              value={editing ? (draft.direccion ?? '') : (legalData?.direccion ?? null)}
+              editing={editing} onChange={v => setField('direccion', v || null)} />
+            <div>
+              <p style={labelStyle}>Ciudad</p>
+              {editing ? (
+                <>
+                  <input type="text" list="ciudad-datalist"
+                    value={draft.ciudad ?? ''} onChange={e => setField('ciudad', e.target.value || null)}
+                    placeholder="Ciudad…" style={inputStyle} />
+                  <datalist id="ciudad-datalist">
+                    {COLOMBIAN_CITIES.map(c => <option key={c} value={c} />)}
+                  </datalist>
+                </>
+              ) : (
+                <p style={valueStyle}>{legalData?.ciudad || <Muted>—</Muted>}</p>
+              )}
+            </div>
+            <Field label="País"
+              value={editing ? (draft.pais ?? 'Colombia') : (legalData?.pais ?? 'Colombia')}
+              editing={editing} onChange={v => setField('pais', v || null)} />
+            <div>
+              <p style={labelStyle}>Zona de Proximidad</p>
+              {zone && zoneColor ? (
+                <span style={{ display: 'inline-block', padding: '3px 12px', borderRadius: 99,
+                  background: zoneColor.bg, color: zoneColor.text,
+                  fontFamily: 'var(--font-body)', fontWeight: 500, fontSize: '0.75rem', letterSpacing: '0.04em' }}>
+                  {zone}
+                </span>
+              ) : (
+                <p style={valueStyle}><Muted>—</Muted></p>
+              )}
+            </div>
+          </div>
+        )}
+      </SectionCard>
+    </>
+  )
+}
+
 /* ─── General Tab (Resumen + Legal + Documentos) ─────────── */
 
 function GeneralTab({ supplier, loading, onUpdate, supplierId }: ResumenTabProps & { supplierId: string | null }) {
   const [prefill, setPrefill] = useState<ExtractedFields | null>(null)
+  const [toast, setToast] = useState<string | null>(null)
+  const showToast = (msg: string) => { setToast(msg); setTimeout(() => setToast(null), 3500) }
+  const clearPrefill = () => setPrefill(null)
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 0 }}>
-      <ResumenTab supplier={supplier} loading={loading} onUpdate={onUpdate} prefill={prefill} onPrefillConsumed={() => setPrefill(null)} />
-      <div style={{ marginTop: 24 }}>
-        <LegalTab supplier={supplier} supplierId={supplierId} prefill={prefill} onPrefillConsumed={() => setPrefill(null)} />
-      </div>
-      <div style={{ marginTop: 24 }}>
+    <>
+      {toast && (
+        <div style={{
+          position: 'fixed', bottom: 28, right: 28,
+          background: 'var(--hh-dark)', color: 'var(--hh-ice)',
+          fontFamily: 'var(--font-body)', fontSize: '0.8125rem',
+          padding: '12px 20px', borderRadius: 6, zIndex: 100,
+          boxShadow: '0 4px 16px rgba(0,0,0,0.15)',
+        }}>{toast}</div>
+      )}
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
+        <IdentidadLegalCard
+          supplier={supplier}
+          loading={loading}
+          supplierId={supplierId}
+          onUpdate={onUpdate}
+          prefill={prefill}
+          onPrefillConsumed={clearPrefill}
+        />
+        <RetencionesCard supplierId={supplierId} showToast={showToast} />
         <DocumentosTab supplierId={supplierId} onExtract={setPrefill} />
+        <AccesoCard supplier={supplier} />
       </div>
-    </div>
+    </>
   )
 }
 
@@ -899,19 +1217,12 @@ interface BankingData {
 
 type BankingDraft = Omit<BankingData, 'id' | 'supplier_id' | 'verificado_at' | 'verificado_por'>
 
-function maskAccount(num: string): string {
-  if (num.length <= 4) return num
-  return '•••• •••• ' + num.slice(-4)
-}
-
 function BancarioTab({ supplierId, nit }: { supplierId: string | null; nit: string | null }) {
   const { session } = useAuth()
   const [data, setData] = useState<BankingData | null>(null)
   const [loading, setLoading] = useState(true)
   const [editing, setEditing] = useState(false)
   const [saving, setSaving] = useState(false)
-  const [verifying, setVerifying] = useState(false)
-  const [revealed, setRevealed] = useState(false)
   const [toast, setToast] = useState<string | null>(null)
   const [syncing, setSyncing] = useState(false)
   const [draft, setDraft] = useState<BankingDraft>({
@@ -1016,81 +1327,6 @@ function BancarioTab({ supplierId, nit }: { supplierId: string | null; nit: stri
     showToast('Cambios guardados.')
   }
 
-  const markVerified = async () => {
-    if (!supplierId || !data?.id || !session?.user) return
-    setVerifying(true)
-    const { data: row, error } = await supabase
-      .from('suppliers_banking')
-      .update({ verificado_at: new Date().toISOString(), verificado_por: session.user.email })
-      .eq('id', data.id)
-      .select()
-      .single()
-    setVerifying(false)
-    if (error) { showToast('Error al verificar.'); return }
-    setData(row as BankingData)
-    showToast('Datos bancarios verificados.')
-  }
-
-  /* ── Verification status banner ── */
-  const VerificationBanner = () => {
-    if (loading) return null
-    if (!data) {
-      return (
-        <div style={{
-          display: 'flex', alignItems: 'center', gap: 10,
-          background: 'rgba(122,145,165,0.08)', border: '1px solid rgba(122,145,165,0.2)',
-          borderRadius: 8, padding: '14px 20px',
-        }}>
-          <span style={{ width: 10, height: 10, borderRadius: '50%', background: 'var(--hh-haze)', flexShrink: 0 }} />
-          <span style={{ fontFamily: 'var(--font-body)', fontSize: '0.8125rem', color: 'var(--hh-haze)' }}>
-            Sin datos bancarios
-          </span>
-        </div>
-      )
-    }
-    if (data.verificado_at) {
-      const date = new Date(data.verificado_at).toLocaleDateString('es-CO', { day: 'numeric', month: 'long', year: 'numeric' })
-      return (
-        <div style={{
-          display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 12,
-          background: 'rgba(74,155,142,0.07)', border: '1px solid rgba(74,155,142,0.25)',
-          borderRadius: 8, padding: '14px 20px',
-        }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-            <CheckCircledIcon width={18} height={18} style={{ color: 'var(--hh-teal)', flexShrink: 0 }} />
-            <div>
-              <span style={{ fontFamily: 'var(--font-body)', fontSize: '0.8125rem', fontWeight: 500, color: 'var(--hh-teal)' }}>
-                Verificado
-              </span>
-              <span style={{ fontFamily: 'var(--font-body)', fontSize: '0.8125rem', color: 'var(--hh-haze)', marginLeft: 10 }}>
-                {date} · {data.verificado_por}
-              </span>
-            </div>
-          </div>
-        </div>
-      )
-    }
-    return (
-      <div style={{
-        display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 12,
-        background: 'rgba(255,208,0,0.08)', border: '1px solid rgba(255,208,0,0.4)',
-        borderRadius: 8, padding: '14px 20px',
-      }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-          <span style={{ width: 10, height: 10, borderRadius: '50%', background: 'var(--hh-lemon)', flexShrink: 0 }} />
-          <span style={{ fontFamily: 'var(--font-body)', fontSize: '0.8125rem', fontWeight: 500, color: 'var(--hh-dark)' }}>
-            Pendiente verificación
-          </span>
-        </div>
-        <button onClick={markVerified} disabled={verifying} style={primaryBtnStyle}>
-          {verifying ? 'Verificando…' : 'Marcar como verificado'}
-        </button>
-      </div>
-    )
-  }
-
-  const numCuenta = editing ? (draft.numero_cuenta ?? '') : (data?.numero_cuenta ?? '')
-
   return (
     <>
       {toast && (
@@ -1106,8 +1342,6 @@ function BancarioTab({ supplierId, nit }: { supplierId: string | null; nit: stri
       )}
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-        <VerificationBanner />
-
         <SectionCard
           title="Datos Bancarios"
           action={
@@ -1178,34 +1412,12 @@ function BancarioTab({ supplierId, nit }: { supplierId: string | null; nit: stri
                 )}
               </div>
 
-              {/* Número de Cuenta — masked with reveal toggle */}
-              <div>
-                <p style={labelStyle}>Número de Cuenta</p>
-                {editing ? (
-                  <input
-                    type="text"
-                    value={draft.numero_cuenta ?? ''}
-                    onChange={e => setDraft(d => ({ ...d, numero_cuenta: e.target.value || null }))}
-                    style={inputStyle}
-                  />
-                ) : (
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                    <p style={{ ...valueStyle, margin: 0, fontFamily: 'var(--font-numeric)', fontVariantNumeric: 'tabular-nums' }}>
-                      {numCuenta
-                        ? (revealed ? numCuenta : <span style={{ color: 'var(--hh-haze)' }}>{maskAccount(numCuenta)}</span>)
-                        : <Muted>—</Muted>}
-                    </p>
-                    {numCuenta && (
-                      <button
-                        onClick={() => setRevealed(r => !r)}
-                        style={{ background: 'none', border: 'none', padding: 2, cursor: 'pointer', color: 'var(--hh-haze)', display: 'flex' }}
-                      >
-                        {revealed ? <EyeClosedIcon width={15} height={15} /> : <EyeOpenIcon width={15} height={15} />}
-                      </button>
-                    )}
-                  </div>
-                )}
-              </div>
+              <Field
+                label="Número de Cuenta"
+                value={editing ? (draft.numero_cuenta ?? '') : (data?.numero_cuenta ?? null)}
+                editing={editing}
+                onChange={v => setDraft(d => ({ ...d, numero_cuenta: v || null }))}
+              />
 
               {/* Tipo Documento Bancolombia */}
               <div>
@@ -1301,7 +1513,8 @@ function DocumentosTab({ supplierId, onExtract }: { supplierId: string | null; o
       return
     }
     setUploading(true)
-    const storagePath = `${supplierId}/${uploadType}/${uploadFile.name}`
+    const slugify = (s: string) => s.normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-zA-Z0-9._-]/g, '_')
+    const storagePath = `${supplierId}/${slugify(uploadType)}/${slugify(uploadFile.name)}`
     const { error: uploadError } = await supabase.storage
       .from('supplier-documents')
       .upload(storagePath, uploadFile, { upsert: true })
