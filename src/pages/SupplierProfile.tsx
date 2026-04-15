@@ -1164,30 +1164,6 @@ function BancarioTab({ supplierId, nit }: { supplierId: string | null; nit: stri
                 )}
               </div>
 
-              {/* Verificación — staff-only note */}
-              <div style={{ gridColumn: 'span 2' }}>
-                <p style={{ ...labelStyle, display: 'flex', alignItems: 'center', gap: 6 }}>
-                  Verificación
-                  <span style={{
-                    background: 'var(--hh-lemon)', color: 'var(--hh-dark)',
-                    fontSize: '0.6rem', fontWeight: 600, letterSpacing: '0.08em',
-                    padding: '1px 6px', borderRadius: 99, textTransform: 'uppercase',
-                  }}>
-                    Solo staff
-                  </span>
-                </p>
-                {editing ? (
-                  <input
-                    type="text"
-                    value={draft.verificacion_notas ?? ''}
-                    onChange={e => setDraft(d => ({ ...d, verificacion_notas: e.target.value || null }))}
-                    placeholder="Notas internas sobre la verificación…"
-                    style={inputStyle}
-                  />
-                ) : (
-                  <p style={valueStyle}>{data?.verificacion_notas || <Muted>—</Muted>}</p>
-                )}
-              </div>
 
             </div>
           )}
