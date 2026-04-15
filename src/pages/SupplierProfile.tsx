@@ -1048,12 +1048,23 @@ function DocumentosTab({ supplierId, onExtract }: { supplierId: string | null; o
       return
     }
     setUploading(true)
-    const form = new FormData()
-    form.append('file', uploadFile)
-    form.append('supplierId', supplierId)
-    form.append('documentType', uploadType)
-    if (session?.user?.email) form.append('uploadedBy', session.user.email)
-    const { data: res, error: fnErr } = await supabase.functions.invoke('upload-document', { body: form })
+    const fileBase64 = await new Promise<string>((resolve, reject) => {
+      const reader = new FileReader()
+      reader.onload = () => resolve((reader.result as string).split(',')[1])
+      reader.onerror = reject
+      reader.readAsDataURL(uploadFile)
+    })
+    const { data: res, error: fnErr } = await supabase.functions.invoke('upload-document', {
+      body: {
+        fileBase64,
+        fileName:     uploadFile.name,
+        mimeType:     uploadFile.type,
+        fileSize:     uploadFile.size,
+        supplierId,
+        documentType: uploadType,
+        uploadedBy:   session?.user?.email ?? null,
+      },
+    })
     setUploading(false)
     if (fnErr || !res?.success) { showToast(`Error al subir: ${fnErr?.message ?? res?.error ?? 'Error desconocido'}`); return }
     setUploadFile(null)

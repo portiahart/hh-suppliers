@@ -1,10 +1,13 @@
 /**
  * upload-document
- * Accepts a multipart/form-data upload, stores the file in the
+ * Accepts a JSON body with a base64-encoded file, stores the file in the
  * supplier-documents bucket and inserts a record into suppliers_documents.
  *
- * Form fields:
- *   file          — the file blob
+ * Body (JSON):
+ *   fileBase64    — base64-encoded file content
+ *   fileName      — original file name
+ *   mimeType      — MIME type of the file
+ *   fileSize      — file size in bytes
  *   supplierId    — UUID of the supplier
  *   documentType  — e.g. "RUT", "Cámara de Comercio"
  *   uploadedBy    — email of the uploading user (optional)
@@ -40,19 +43,24 @@ Deno.serve(async (req: Request) => {
   const headers = { ...corsHeaders(req), 'Content-Type': 'application/json' }
 
   try {
-    const form = await req.formData()
-    const file         = form.get('file') as File | null
-    const supplierId   = form.get('supplierId') as string | null
-    const documentType = form.get('documentType') as string | null
-    const uploadedBy   = form.get('uploadedBy') as string | null
+    const { fileBase64, fileName, mimeType, fileSize, supplierId, documentType, uploadedBy } =
+      await req.json() as {
+        fileBase64: string
+        fileName: string
+        mimeType: string
+        fileSize: number
+        supplierId: string
+        documentType: string
+        uploadedBy?: string
+      }
 
-    if (!file || !supplierId || !documentType) {
+    if (!fileBase64 || !fileName || !mimeType || !supplierId || !documentType) {
       return new Response(JSON.stringify({ success: false, error: 'Missing required fields' }), { status: 400, headers })
     }
-    if (!ACCEPTED_MIME.has(file.type)) {
+    if (!ACCEPTED_MIME.has(mimeType)) {
       return new Response(JSON.stringify({ success: false, error: 'Tipo de archivo no permitido' }), { status: 400, headers })
     }
-    if (file.size > MAX_BYTES) {
+    if (fileSize > MAX_BYTES) {
       return new Response(JSON.stringify({ success: false, error: 'El archivo supera el límite de 10 MB' }), { status: 400, headers })
     }
 
@@ -61,30 +69,30 @@ Deno.serve(async (req: Request) => {
       Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!,
     )
 
-    const storagePath = `${supplierId}/${slugify(documentType)}/${slugify(file.name)}`
-    const arrayBuffer = await file.arrayBuffer()
+    const fileBytes = Uint8Array.from(atob(fileBase64), c => c.charCodeAt(0))
+    const storagePath = `${supplierId}/${slugify(documentType)}/${slugify(fileName)}`
 
     const { error: storageErr } = await supabase.storage
       .from('supplier-documents')
-      .upload(storagePath, arrayBuffer, { contentType: file.type, upsert: true })
+      .upload(storagePath, fileBytes, { contentType: mimeType, upsert: true })
 
-    if (storageErr) throw new Error(`Storage error: ${storageErr.message}`)
+    if (storageErr) throw new Error(`Storage: ${storageErr.message}`)
 
     const { data: doc, error: dbErr } = await supabase
       .from('suppliers_documents')
       .insert({
-        supplier_id:      supplierId,
-        document_type:    documentType,
-        storage_path:     storagePath,
-        file_name:        file.name,
-        file_size_bytes:  file.size,
-        mime_type:        file.type,
-        uploaded_by:      uploadedBy ?? null,
+        supplier_id:     supplierId,
+        document_type:   documentType,
+        storage_path:    storagePath,
+        file_name:       fileName,
+        file_size_bytes: fileSize,
+        mime_type:       mimeType,
+        uploaded_by:     uploadedBy ?? null,
       })
       .select()
       .single()
 
-    if (dbErr) throw new Error(`DB error: ${dbErr.message}`)
+    if (dbErr) throw new Error(`DB: ${dbErr.message}`)
 
     return new Response(JSON.stringify({ success: true, doc }), { headers })
   } catch (e) {
