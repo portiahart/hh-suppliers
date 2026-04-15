@@ -456,12 +456,6 @@ function IdentidadLegalCard({ supplier, loading, supplierId, onUpdate, prefill, 
                 <p style={valueStyle}>{supplier?.status ? <StatusBadge status={supplier.status} /> : <Muted>—</Muted>}</p>
               )}
             </div>
-            <Field label="Código Tributario"
-              value={editing ? (draft.codigo_tributario ?? '') : (legalData?.codigo_tributario ?? null)}
-              editing={editing} onChange={v => setField('codigo_tributario', v || null)} />
-            <Field label="CIIU"
-              value={editing ? (draft.ciiu ?? '') : (legalData?.ciiu ?? null)}
-              editing={editing} onChange={v => setField('ciiu', v || null)} />
             <Field label="Dirección"
               value={editing ? (draft.direccion ?? '') : (legalData?.direccion ?? null)}
               editing={editing} onChange={v => setField('direccion', v || null)} />
@@ -480,27 +474,12 @@ function IdentidadLegalCard({ supplier, loading, supplierId, onUpdate, prefill, 
                 <p style={valueStyle}>{legalData?.ciudad || <Muted>—</Muted>}</p>
               )}
             </div>
-            <Field label="País"
-              value={editing ? (draft.pais ?? 'Colombia') : (legalData?.pais ?? 'Colombia')}
-              editing={editing} onChange={v => setField('pais', v || null)} />
             <Field label="Representante Legal"
               value={editing ? (draft.rep_legal_nombre ?? '') : (legalData?.rep_legal_nombre ?? null)}
               editing={editing} onChange={v => setField('rep_legal_nombre', v || null)} />
             <Field label="Doc. Representante Legal"
               value={editing ? (draft.rep_legal_documento ?? '') : (legalData?.rep_legal_documento ?? null)}
               editing={editing} onChange={v => setField('rep_legal_documento', v || null)} />
-            <div>
-              <p style={labelStyle}>Zona de Proximidad</p>
-              {zone && zoneColor ? (
-                <span style={{ display: 'inline-block', padding: '3px 12px', borderRadius: 99,
-                  background: zoneColor.bg, color: zoneColor.text,
-                  fontFamily: 'var(--font-body)', fontWeight: 500, fontSize: '0.75rem', letterSpacing: '0.04em' }}>
-                  {zone}
-                </span>
-              ) : (
-                <p style={valueStyle}><Muted>—</Muted></p>
-              )}
-            </div>
           </div>
         )}
       </SectionCard>
@@ -513,10 +492,10 @@ function IdentidadLegalCard({ supplier, loading, supplierId, onUpdate, prefill, 
 function GeneralTab({ supplier, loading, onUpdate, supplierId }: ResumenTabProps & { supplierId: string | null }) {
   const [prefill, setPrefill] = useState<ExtractedFields | null>(null)
   const [toast, setToast] = useState<string | null>(null)
-  const [retencionesKey, setRetencionesKey] = useState(0)
+  const [analysisKey, setAnalysisKey] = useState(0)
   const showToast = (msg: string) => { setToast(msg); setTimeout(() => setToast(null), 3500) }
   const clearPrefill = () => setPrefill(null)
-  const refreshRetenciones = () => setRetencionesKey(k => k + 1)
+  const onRUTAnalyzed = () => setAnalysisKey(k => k + 1)
   return (
     <>
       {toast && (
@@ -537,8 +516,9 @@ function GeneralTab({ supplier, loading, onUpdate, supplierId }: ResumenTabProps
           prefill={prefill}
           onPrefillConsumed={clearPrefill}
         />
-        <RetencionesCard key={retencionesKey} supplierId={supplierId} showToast={showToast} />
-        <DocumentosTab supplierId={supplierId} onExtract={setPrefill} onRetentionUpdated={refreshRetenciones} />
+        <TributoriaCard key={analysisKey} supplierId={supplierId} />
+        <RetencionesCard key={`ret-${analysisKey}`} supplierId={supplierId} showToast={showToast} />
+        <DocumentosTab supplierId={supplierId} onExtract={setPrefill} onRetentionUpdated={onRUTAnalyzed} />
         <AccesoCard supplier={supplier} />
       </div>
     </>
@@ -672,6 +652,102 @@ const ZONE_COLORS: Record<string, { bg: string; text: string }> = {
   ROW:       { bg: 'var(--hh-dark)',  text: 'var(--hh-ice)' },
 }
 
+async function updateLegalFromRUT(supplierId: string, rut: RUTData): Promise<void> {
+  const allCIIUs = [
+    rut.actividad_principal?.codigo,
+    rut.actividad_secundaria?.codigo,
+    ...(rut.otras_actividades ?? []),
+  ].filter(Boolean) as string[]
+  const ciiu = allCIIUs.length > 0 ? allCIIUs.join(',') : null
+  const codigo_tributario = (rut.responsabilidades ?? []).length > 0 ? rut.responsabilidades.join('-') : null
+  if (!ciiu && !codigo_tributario) return
+  const payload: Record<string, string | null> = { updated_at: new Date().toISOString() }
+  if (ciiu) payload.ciiu = ciiu
+  if (codigo_tributario) payload.codigo_tributario = codigo_tributario
+  const { data: existing } = await supabase.from('suppliers_legal').select('id').eq('supplier_id', supplierId).maybeSingle()
+  if (existing?.id) {
+    await supabase.from('suppliers_legal').update(payload).eq('id', existing.id)
+  } else {
+    await supabase.from('suppliers_legal').insert({ supplier_id: supplierId, ...payload })
+  }
+}
+
+/* ─── Tributaria Card ────────────────────────────────────── */
+
+function TributoriaCard({ supplierId }: { supplierId: string | null }) {
+  const [legalData, setLegalData] = useState<LegalData | null>(null)
+  const [loading, setLoading] = useState(true)
+
+  useEffect(() => {
+    if (!supplierId) { setLoading(false); return }
+    void (async () => {
+      const { data } = await supabase.from('suppliers_legal').select('ciiu, codigo_tributario').eq('supplier_id', supplierId).maybeSingle()
+      setLegalData((data as LegalData) ?? null)
+      setLoading(false)
+    })()
+  }, [supplierId])
+
+  const ciiuCodes = legalData?.ciiu
+    ? legalData.ciiu.split(',').map(s => s.trim()).filter(Boolean)
+    : []
+  const respCodes = legalData?.codigo_tributario
+    ? legalData.codigo_tributario.split('-').map(s => s.trim()).filter(Boolean)
+    : []
+  const hasData = ciiuCodes.length > 0 || respCodes.length > 0
+
+  return (
+    <SectionCard title="Información Tributaria">
+      {loading ? (
+        <SkeletonFields />
+      ) : !hasData ? (
+        <p style={{ fontFamily: 'var(--font-body)', fontWeight: 300, fontSize: '0.875rem', color: 'var(--hh-haze)', margin: 0 }}>
+          Sin información tributaria — analiza el RUT en la sección Documentos para poblar automáticamente.
+        </p>
+      ) : (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 28 }}>
+          {ciiuCodes.length > 0 && (
+            <div>
+              <p style={{ ...labelStyle, marginBottom: 12 }}>Actividades Económicas (CIIU)</p>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                {ciiuCodes.map(code => (
+                  <div key={code} style={{ display: 'flex', gap: 16, alignItems: 'baseline' }}>
+                    <span style={{ fontFamily: 'var(--font-numeric)', fontWeight: 600, fontSize: '0.8125rem', color: 'var(--hh-dark)', minWidth: 44, flexShrink: 0 }}>
+                      {code}
+                    </span>
+                    <span style={{ fontFamily: 'var(--font-body)', fontWeight: 300, fontSize: '0.875rem', color: 'var(--hh-dark)', lineHeight: 1.4 }}>
+                      {CIIU_LABELS[code] ?? <Muted>Código no registrado en el sistema</Muted>}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+          {respCodes.length > 0 && (
+            <div>
+              <p style={{ ...labelStyle, marginBottom: 12 }}>Responsabilidades Tributarias</p>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                {respCodes.map(code => (
+                  <div key={code} style={{ display: 'flex', gap: 16, alignItems: 'baseline' }}>
+                    <span style={{ fontFamily: 'var(--font-numeric)', fontWeight: 600, fontSize: '0.8125rem', color: 'var(--hh-dark)', minWidth: 44, flexShrink: 0 }}>
+                      [{code}]
+                    </span>
+                    <span style={{ fontFamily: 'var(--font-body)', fontWeight: 300, fontSize: '0.875rem', color: 'var(--hh-dark)', lineHeight: 1.4 }}>
+                      {RESPONSABILIDADES_LABELS[code] ?? <Muted>Código no registrado en el sistema</Muted>}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+          <p style={{ fontFamily: 'var(--font-body)', fontWeight: 300, fontSize: '0.75rem', color: 'var(--hh-haze)', margin: 0 }}>
+            Actualizado automáticamente al analizar el RUT.
+          </p>
+        </div>
+      )}
+    </SectionCard>
+  )
+}
+
 /* ─── Retenciones Card ───────────────────────────────────── */
 
 function RetencionesCard({ supplierId, showToast }: { supplierId: string | null; showToast: (m: string) => void }) {
@@ -778,8 +854,12 @@ function RetencionesCard({ supplierId, showToast }: { supplierId: string | null;
         body: { url: urlData.signedUrl },
       })
       if (fnErr || !res?.success) throw new Error(fnErr?.message ?? res?.error ?? 'Error al analizar RUT.')
-      const recommendations = enrichRecommendations(computeRetenciones(res.rut), res.rut as RUTData)
-      await upsertRetenciones(supplierId, recommendations)
+      const rut = res.rut as RUTData
+      const recommendations = enrichRecommendations(computeRetenciones(rut), rut)
+      await Promise.all([
+        upsertRetenciones(supplierId, recommendations),
+        updateLegalFromRUT(supplierId, rut),
+      ])
       const { data } = await supabase
         .from('suppliers_retenciones').select('*')
         .eq('supplier_id', supplierId).order('created_at')
@@ -1304,8 +1384,12 @@ function DocumentosTab({ supplierId, onExtract, onRetentionUpdated }: { supplier
         body: { url: urlData.signedUrl },
       })
       if (fnErr || !res?.success) throw new Error(fnErr?.message ?? res?.error ?? 'Error al analizar RUT.')
-      const recommendations = enrichRecommendations(computeRetenciones(res.rut), res.rut as RUTData)
-      await upsertRetenciones(supplierId, recommendations)
+      const rut = res.rut as RUTData
+      const recommendations = enrichRecommendations(computeRetenciones(rut), rut)
+      await Promise.all([
+        upsertRetenciones(supplierId, recommendations),
+        updateLegalFromRUT(supplierId, rut),
+      ])
       setRutBannerPath(null)
       onRetentionUpdated?.()
       showToast('Retenciones calculadas — revisa la sección de Retenciones.')
