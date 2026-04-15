@@ -909,10 +909,17 @@ function BancarioTab({ supplierId, nit }: { supplierId: string | null; nit: stri
       const match = mainRows[rowIdx] as unknown[] | undefined
       if (!match) { showToast('Fila de datos bancarios no encontrada.'); setSyncing(false); return }
       const cell = (i: number) => { const v = match[i]; return typeof v === 'string' && v.trim() ? v.trim() : null }
+      const normTipoCuenta = (v: string | null): string | null => {
+        if (!v) return null
+        const u = v.toUpperCase()
+        if (u.includes('AHORRO')) return 'Ahorros'
+        if (u.includes('CORRIENTE')) return 'Corriente'
+        return null
+      }
       const sheetDraft: BankingDraft = {
         nombre_beneficiario:        cell(14), // col O
         numero_cuenta:              cell(15), // col P
-        tipo_cuenta:                cell(16), // col Q
+        tipo_cuenta:                normTipoCuenta(cell(16)), // col Q
         banco:                      cell(17), // col R
         tipo_documento_bancolombia: cell(18), // col S
         verificacion_notas:         data?.verificacion_notas ?? null,
