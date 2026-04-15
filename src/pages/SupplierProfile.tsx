@@ -585,30 +585,6 @@ interface Retencion {
   notas: string | null
 }
 
-function buildRUTContext(rut: RUTData): string {
-  const allCIIUs = [
-    rut.actividad_principal?.codigo,
-    rut.actividad_secundaria?.codigo,
-    ...(rut.otras_actividades ?? []),
-  ].filter(Boolean) as string[]
-
-  const ciiuParts = allCIIUs.map(c => CIIU_LABELS[c] ? `${c} · ${CIIU_LABELS[c]}` : c)
-  const respParts = (rut.responsabilidades ?? []).map(r => RESPONSABILIDADES_LABELS[r] ? `[${r}] ${RESPONSABILIDADES_LABELS[r]}` : `[${r}]`)
-
-  const parts: string[] = []
-  if (ciiuParts.length) parts.push(`Actividades: ${ciiuParts.join(', ')}`)
-  if (respParts.length) parts.push(`Responsabilidades: ${respParts.join(', ')}`)
-  return parts.join('. ')
-}
-
-function enrichRecommendations(recommendations: RetencionRecomendada[], rut: RUTData): RetencionRecomendada[] {
-  const context = buildRUTContext(rut)
-  if (!context) return recommendations
-  return recommendations.map(rec => ({
-    ...rec,
-    notas: [rec.notas, context].filter(Boolean).join(' | '),
-  }))
-}
 
 async function upsertRetenciones(supplierId: string, recommendations: RetencionRecomendada[]): Promise<void> {
   const { data: existing, error: fetchErr } = await supabase
@@ -696,7 +672,7 @@ function TributoriaCard({ supplierId, onAnalyzed, showToast }: { supplierId: str
       const { data: res, error: fnErr } = await supabase.functions.invoke('extract-rut', { body: { url: urlData.signedUrl } })
       if (fnErr || !res?.success) throw new Error(fnErr?.message ?? res?.error ?? 'Error al analizar RUT.')
       const rut = res.rut as RUTData
-      const recommendations = enrichRecommendations(computeRetenciones(rut), rut)
+      const recommendations = computeRetenciones(rut)
       await Promise.all([upsertRetenciones(supplierId, recommendations), updateLegalFromRUT(supplierId, rut)])
       onAnalyzed?.()
     } catch (e) {
@@ -810,7 +786,7 @@ function RetencionesCard({ supplierId, showToast }: { supplierId: string | null;
     setDraftRows(prev => [...prev, {
       id: tempId,
       supplier_id: supplierId ?? '',
-      retencion_tipo: 'RetenFuente',
+      retencion_tipo: 'Retefuente',
       concepto: null,
       tarifa_recomendada: null,
       base_minima: null,
@@ -884,7 +860,7 @@ function RetencionesCard({ supplierId, showToast }: { supplierId: string | null;
       })
       if (fnErr || !res?.success) throw new Error(fnErr?.message ?? res?.error ?? 'Error al analizar RUT.')
       const rut = res.rut as RUTData
-      const recommendations = enrichRecommendations(computeRetenciones(rut), rut)
+      const recommendations = computeRetenciones(rut)
       await Promise.all([
         upsertRetenciones(supplierId, recommendations),
         updateLegalFromRUT(supplierId, rut),
@@ -934,10 +910,10 @@ function RetencionesCard({ supplierId, showToast }: { supplierId: string | null;
         </p>
       ) : (
         <div style={{ overflowX: 'auto' }}>
-          <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 720 }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 480 }}>
             <thead>
               <tr style={{ borderBottom: '1px solid rgba(122,145,165,0.2)' }}>
-                {['Tipo', 'Concepto', 'Tarifa Rec. (%)', 'Base Mínima (COP)', 'Tarifa Aplic. (%)', 'Aplica', 'Notas'].map(h => (
+                {['Tipo', 'Concepto', 'Tarifa Sug.', 'Tarifa Aplic.', 'Aplica'].map(h => (
                   <th key={h} style={retThStyle}>{h}</th>
                 ))}
               </tr>
@@ -948,7 +924,7 @@ function RetencionesCard({ supplierId, showToast }: { supplierId: string | null;
                   <td style={retTdStyle}>
                     {editing ? (
                       <select value={r.retencion_tipo} onChange={e => updateRow(r.id, 'retencion_tipo', e.target.value)} style={{ ...inputStyle, width: 'auto' }}>
-                        <option>RetenFuente</option>
+                        <option>Retefuente</option>
                         <option>ReteICA</option>
                         <option>ReteIVA</option>
                       </select>
@@ -963,13 +939,13 @@ function RetencionesCard({ supplierId, showToast }: { supplierId: string | null;
                   </td>
                   <td style={retTdStyle}>
                     {editing
-                      ? <input type="number" value={r.tarifa_recomendada ?? ''} onChange={e => updateRow(r.id, 'tarifa_recomendada', e.target.value ? Number(e.target.value) : null)} style={{ ...inputStyle, width: 72 }} />
+                      ? <input type="number" value={r.tarifa_recomendada ?? ''} onChange={e => updateRow(r.id, 'tarifa_recomendada', e.target.value ? Number(e.target.value) : null)} style={{ ...inputStyle, width: 64 }} />
                       : r.tarifa_recomendada === null && r.aplica ? (
                         <span style={{ display: 'inline-block', padding: '2px 8px', borderRadius: 99, background: 'rgba(255,193,7,0.15)', color: '#856404', fontSize: '0.75rem', fontWeight: 500 }}>
                           Revisar
                         </span>
                       ) : (
-                        <span title={r.notas ?? undefined} style={{ ...retValStyle, color: 'var(--hh-haze)', fontFamily: 'var(--font-numeric)', fontVariantNumeric: 'tabular-nums', cursor: r.notas ? 'help' : 'default' }}>
+                        <span style={{ ...retValStyle, color: 'var(--hh-haze)', fontFamily: 'var(--font-numeric)', fontVariantNumeric: 'tabular-nums' }}>
                           {r.tarifa_recomendada != null ? `${r.tarifa_recomendada}${r.retencion_tipo === 'ReteICA' ? '‰' : '%'}` : <Muted>—</Muted>}
                         </span>
                       )
@@ -977,12 +953,7 @@ function RetencionesCard({ supplierId, showToast }: { supplierId: string | null;
                   </td>
                   <td style={retTdStyle}>
                     {editing
-                      ? <input type="number" value={r.base_minima ?? ''} onChange={e => updateRow(r.id, 'base_minima', e.target.value ? Number(e.target.value) : null)} style={{ ...inputStyle, width: 110 }} />
-                      : <span style={{ ...retValStyle, fontFamily: 'var(--font-numeric)', fontVariantNumeric: 'tabular-nums' }}>{r.base_minima != null ? `$${Math.round(r.base_minima).toLocaleString('es-CO')}` : <Muted>—</Muted>}</span>}
-                  </td>
-                  <td style={retTdStyle}>
-                    {editing
-                      ? <input type="number" value={r.tarifa_aplicada ?? ''} onChange={e => updateRow(r.id, 'tarifa_aplicada', e.target.value ? Number(e.target.value) : null)} style={{ ...inputStyle, width: 72 }} />
+                      ? <input type="number" value={r.tarifa_aplicada ?? ''} onChange={e => updateRow(r.id, 'tarifa_aplicada', e.target.value ? Number(e.target.value) : null)} style={{ ...inputStyle, width: 64 }} />
                       : (() => {
                           const differs = r.tarifa_aplicada != null && r.tarifa_aplicada !== r.tarifa_recomendada
                           return (
@@ -1008,11 +979,6 @@ function RetencionesCard({ supplierId, showToast }: { supplierId: string | null;
                         {r.aplica ? 'Sí' : 'No'}
                       </span>
                     )}
-                  </td>
-                  <td style={retTdStyle}>
-                    {editing
-                      ? <input type="text" value={r.notas ?? ''} onChange={e => updateRow(r.id, 'notas', e.target.value || null)} style={inputStyle} />
-                      : <span style={retValStyle}>{r.notas ?? <Muted>—</Muted>}</span>}
                   </td>
                 </tr>
               ))}
@@ -1396,7 +1362,7 @@ function DocumentosTab({ supplierId, onExtract, onRetentionUpdated }: { supplier
       onExtract(res.fields as ExtractedFields)
       if (supplierId && res.rut) {
         const rut = res.rut as RUTData
-        const recommendations = enrichRecommendations(computeRetenciones(rut), rut)
+        const recommendations = computeRetenciones(rut)
         await Promise.all([upsertRetenciones(supplierId, recommendations), updateLegalFromRUT(supplierId, rut)])
         onRetentionUpdated?.()
       }
@@ -1420,7 +1386,7 @@ function DocumentosTab({ supplierId, onExtract, onRetentionUpdated }: { supplier
       })
       if (fnErr || !res?.success) throw new Error(fnErr?.message ?? res?.error ?? 'Error al analizar RUT.')
       const rut = res.rut as RUTData
-      const recommendations = enrichRecommendations(computeRetenciones(rut), rut)
+      const recommendations = computeRetenciones(rut)
       await Promise.all([
         upsertRetenciones(supplierId, recommendations),
         updateLegalFromRUT(supplierId, rut),

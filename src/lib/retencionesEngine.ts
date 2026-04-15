@@ -72,10 +72,10 @@ export function computeRetenciones(rut: RUTData): RetencionRecomendada[] {
   const uniqueConcepts  = [...new Set(allCIIUs.map(getCIIUConcept))]
   const multiConcepts   = uniqueConcepts.length > 1
 
-  // ── RetenFuente ──────────────────────────────────────────────────────────
+  // ── Retefuente ──────────────────────────────────────────────────────────
   if (isSIMPLE) {
     results.push({
-      retencion_tipo: 'RetenFuente',
+      retencion_tipo: 'Retefuente',
       concepto: 'No aplica — Régimen Simple de Tributación',
       tarifa_recomendada: 0,
       base_minima: null,
@@ -84,7 +84,7 @@ export function computeRetenciones(rut: RUTData): RetencionRecomendada[] {
     })
   } else if (isAutorretenedor) {
     results.push({
-      retencion_tipo: 'RetenFuente',
+      retencion_tipo: 'Retefuente',
       concepto: 'No aplica — Autorretenedor',
       tarifa_recomendada: 0,
       base_minima: null,
@@ -93,7 +93,7 @@ export function computeRetenciones(rut: RUTData): RetencionRecomendada[] {
     })
   } else if (multiConcepts) {
     results.push({
-      retencion_tipo: 'RetenFuente',
+      retencion_tipo: 'Retefuente',
       concepto: 'Múltiples actividades — revisar por tipo de compra',
       tarifa_recomendada: null,
       base_minima: null,
@@ -121,7 +121,7 @@ export function computeRetenciones(rut: RUTData): RetencionRecomendada[] {
         label = `Servicios generales — ${isDeclarante ? 'declarante' : 'no declarante'}`
     }
     results.push({
-      retencion_tipo: 'RetenFuente', concepto: label,
+      retencion_tipo: 'Retefuente', concepto: label,
       tarifa_recomendada: tarifa, base_minima: base, aplica: true,
       notas: `CIIU ${primaryCIIU ?? 'no registrado'}. UVT 2026: ${UVT_2026.toLocaleString('es-CO')}.`,
     })
