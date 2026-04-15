@@ -5,7 +5,8 @@ import { useAuth } from '../context/AuthContext'
 import { supabase } from '../lib/supabase'
 import type { Supplier } from '../types/supplier'
 import { computeRetenciones } from '../lib/retencionesEngine'
-import type { RetencionRecomendada } from '../lib/rutTypes'
+import type { RetencionRecomendada, RUTData } from '../lib/rutTypes'
+import { CIIU_LABELS, RESPONSABILIDADES_LABELS } from '../lib/rutLookups'
 
 const TABS = ['General', 'Bancario', 'Evaluación', 'B Corp', 'Gasto'] as const
 type Tab = typeof TABS[number]
@@ -512,8 +513,10 @@ function IdentidadLegalCard({ supplier, loading, supplierId, onUpdate, prefill, 
 function GeneralTab({ supplier, loading, onUpdate, supplierId }: ResumenTabProps & { supplierId: string | null }) {
   const [prefill, setPrefill] = useState<ExtractedFields | null>(null)
   const [toast, setToast] = useState<string | null>(null)
+  const [retencionesKey, setRetencionesKey] = useState(0)
   const showToast = (msg: string) => { setToast(msg); setTimeout(() => setToast(null), 3500) }
   const clearPrefill = () => setPrefill(null)
+  const refreshRetenciones = () => setRetencionesKey(k => k + 1)
   return (
     <>
       {toast && (
@@ -534,8 +537,8 @@ function GeneralTab({ supplier, loading, onUpdate, supplierId }: ResumenTabProps
           prefill={prefill}
           onPrefillConsumed={clearPrefill}
         />
-        <RetencionesCard supplierId={supplierId} showToast={showToast} />
-        <DocumentosTab supplierId={supplierId} onExtract={setPrefill} />
+        <RetencionesCard key={retencionesKey} supplierId={supplierId} showToast={showToast} />
+        <DocumentosTab supplierId={supplierId} onExtract={setPrefill} onRetentionUpdated={refreshRetenciones} />
         <AccesoCard supplier={supplier} />
       </div>
     </>
@@ -605,11 +608,38 @@ interface Retencion {
   notas: string | null
 }
 
+function buildRUTContext(rut: RUTData): string {
+  const allCIIUs = [
+    rut.actividad_principal?.codigo,
+    rut.actividad_secundaria?.codigo,
+    ...(rut.otras_actividades ?? []),
+  ].filter(Boolean) as string[]
+
+  const ciiuParts = allCIIUs.map(c => CIIU_LABELS[c] ? `${c} · ${CIIU_LABELS[c]}` : c)
+  const respParts = (rut.responsabilidades ?? []).map(r => RESPONSABILIDADES_LABELS[r] ? `[${r}] ${RESPONSABILIDADES_LABELS[r]}` : `[${r}]`)
+
+  const parts: string[] = []
+  if (ciiuParts.length) parts.push(`Actividades: ${ciiuParts.join(', ')}`)
+  if (respParts.length) parts.push(`Responsabilidades: ${respParts.join(', ')}`)
+  return parts.join('. ')
+}
+
+function enrichRecommendations(recommendations: RetencionRecomendada[], rut: RUTData): RetencionRecomendada[] {
+  const context = buildRUTContext(rut)
+  if (!context) return recommendations
+  return recommendations.map(rec => ({
+    ...rec,
+    notas: [rec.notas, context].filter(Boolean).join(' | '),
+  }))
+}
+
 async function upsertRetenciones(supplierId: string, recommendations: RetencionRecomendada[]): Promise<void> {
-  const { data: existing } = await supabase
+  const { data: existing, error: fetchErr } = await supabase
     .from('suppliers_retenciones')
     .select('id, tipo, tarifa_aplicada')
     .eq('supplier_id', supplierId)
+  if (fetchErr) throw new Error(`Error al leer retenciones: ${fetchErr.message}`)
+
   const existingMap = new Map<string, { id: string; tarifa_aplicada: number | null }>()
   for (const row of (existing ?? [])) {
     existingMap.set(row.tipo, { id: row.id, tarifa_aplicada: row.tarifa_aplicada })
@@ -626,9 +656,11 @@ async function upsertRetenciones(supplierId: string, recommendations: RetencionR
     }
     const existingRow = existingMap.get(tipo)
     if (existingRow) {
-      await supabase.from('suppliers_retenciones').update(payload).eq('id', existingRow.id)
+      const { error } = await supabase.from('suppliers_retenciones').update(payload).eq('id', existingRow.id)
+      if (error) throw new Error(`Error al actualizar ${tipo}: ${error.message}`)
     } else {
-      await supabase.from('suppliers_retenciones').insert({ supplier_id: supplierId, tipo, tarifa_aplicada: null, ...payload })
+      const { error } = await supabase.from('suppliers_retenciones').insert({ supplier_id: supplierId, tipo, tarifa_aplicada: null, ...payload })
+      if (error) throw new Error(`Error al insertar ${tipo}: ${error.message}`)
     }
   }
 }
@@ -746,7 +778,7 @@ function RetencionesCard({ supplierId, showToast }: { supplierId: string | null;
         body: { url: urlData.signedUrl },
       })
       if (fnErr || !res?.success) throw new Error(fnErr?.message ?? res?.error ?? 'Error al analizar RUT.')
-      const recommendations = computeRetenciones(res.rut)
+      const recommendations = enrichRecommendations(computeRetenciones(res.rut), res.rut as RUTData)
       await upsertRetenciones(supplierId, recommendations)
       const { data } = await supabase
         .from('suppliers_retenciones').select('*')
@@ -1167,7 +1199,7 @@ interface DocRow {
   uploaded_by: string | null
 }
 
-function DocumentosTab({ supplierId, onExtract }: { supplierId: string | null; onExtract?: (f: ExtractedFields) => void }) {
+function DocumentosTab({ supplierId, onExtract, onRetentionUpdated }: { supplierId: string | null; onExtract?: (f: ExtractedFields) => void; onRetentionUpdated?: () => void }) {
   const { session } = useAuth()
   const [docs, setDocs] = useState<DocRow[]>([])
   const [loading, setLoading] = useState(true)
@@ -1272,9 +1304,10 @@ function DocumentosTab({ supplierId, onExtract }: { supplierId: string | null; o
         body: { url: urlData.signedUrl },
       })
       if (fnErr || !res?.success) throw new Error(fnErr?.message ?? res?.error ?? 'Error al analizar RUT.')
-      const recommendations = computeRetenciones(res.rut)
+      const recommendations = enrichRecommendations(computeRetenciones(res.rut), res.rut as RUTData)
       await upsertRetenciones(supplierId, recommendations)
       setRutBannerPath(null)
+      onRetentionUpdated?.()
       showToast('Retenciones calculadas — revisa la sección de Retenciones.')
     } catch (e) {
       showToast(e instanceof Error ? e.message : 'Error al analizar el RUT.')
