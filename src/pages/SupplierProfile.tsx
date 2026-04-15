@@ -174,6 +174,40 @@ function AccesoCard({ supplier }: { supplier: Supplier | null }) {
   )
 }
 
+/* ─── Smart prefill helpers ──────────────────────────────── */
+
+// Normalise a string: lowercase, collapse punctuation/spaces
+function normStr(s: string | null | undefined): string {
+  if (!s) return ''
+  return s.toLowerCase().replace(/[^a-z0-9\s]/g, ' ').replace(/\s+/g, ' ').trim()
+}
+
+// Generic: keep existing if non-empty and normalised values match; otherwise use extracted
+function smartFill(existing: string | null | undefined, extracted: string | null | undefined): string | null {
+  if (!extracted) return existing ?? null
+  if (!existing)  return extracted
+  return normStr(existing) === normStr(extracted) ? existing : extracted
+}
+
+// Phone: strip to digits, compare last 10 (ignore +57 prefix differences)
+function smartFillPhone(existing: string | null | undefined, extracted: string | null | undefined): string | null {
+  if (!extracted) return existing ?? null
+  if (!existing)  return extracted
+  const digits = (s: string) => s.replace(/\D/g, '').slice(-10)
+  return digits(existing) === digits(extracted) ? existing : extracted
+}
+
+// Address: token-overlap ≥ 70% → treat as same (RUT addresses are notoriously inconsistent)
+function smartFillAddress(existing: string | null | undefined, extracted: string | null | undefined): string | null {
+  if (!extracted) return existing ?? null
+  if (!existing)  return extracted
+  const tokens = (s: string) => new Set(normStr(s).split(' ').filter(t => t.length > 1))
+  const a = tokens(existing), b = tokens(extracted)
+  const overlap = [...a].filter(t => b.has(t)).length
+  const similarity = overlap / Math.max(a.size, b.size, 1)
+  return similarity >= 0.7 ? existing : extracted
+}
+
 /* ─── IdentidadLegal Card (merged) ───────────────────────── */
 
 interface IdentidadLegalDraft {
@@ -232,20 +266,21 @@ function IdentidadLegalCard({ supplier, loading, supplierId, onUpdate, prefill, 
   useEffect(() => {
     if (!prefill) return
     setDraft(d => {
-      const ciudad = prefill.ciudad ?? d.ciudad ?? legalData?.ciudad ?? null
+      const existingCiudad = d.ciudad ?? legalData?.ciudad ?? null
+      const ciudad = smartFill(existingCiudad, prefill.ciudad)
       return {
         ...d,
-        tipo_persona:        prefill.tipo_persona        ?? d.tipo_persona        ?? supplier?.tipo_persona      ?? '',
-        email:               prefill.email               ?? d.email               ?? supplier?.email              ?? '',
-        telefono:            prefill.telefono             ?? d.telefono             ?? supplier?.telefono           ?? '',
-        codigo_tributario:   prefill.codigo_tributario   ?? d.codigo_tributario   ?? legalData?.codigo_tributario ?? null,
-        ciiu:                prefill.ciiu                ?? d.ciiu                ?? legalData?.ciiu              ?? null,
-        direccion:           prefill.direccion           ?? d.direccion           ?? legalData?.direccion         ?? null,
+        tipo_persona:        smartFill(d.tipo_persona || supplier?.tipo_persona, prefill.tipo_persona) ?? d.tipo_persona ?? '',
+        email:               smartFill(d.email || supplier?.email, prefill.email) ?? d.email ?? '',
+        telefono:            smartFillPhone(d.telefono || supplier?.telefono, prefill.telefono) ?? d.telefono ?? '',
+        codigo_tributario:   smartFill(d.codigo_tributario ?? legalData?.codigo_tributario, prefill.codigo_tributario),
+        ciiu:                smartFill(d.ciiu ?? legalData?.ciiu, prefill.ciiu),
+        direccion:           smartFillAddress(d.direccion ?? legalData?.direccion, prefill.direccion),
         ciudad,
-        pais:                prefill.pais                ?? d.pais                ?? legalData?.pais              ?? 'Colombia',
+        pais:                smartFill(d.pais ?? legalData?.pais, prefill.pais) ?? 'Colombia',
         proximity_zone:      ciudad ? computeZone(ciudad) : d.proximity_zone ?? legalData?.proximity_zone ?? null,
-        rep_legal_nombre:    prefill.rep_legal_nombre    ?? d.rep_legal_nombre    ?? legalData?.rep_legal_nombre    ?? null,
-        rep_legal_documento: prefill.rep_legal_documento ?? d.rep_legal_documento ?? legalData?.rep_legal_documento ?? null,
+        rep_legal_nombre:    smartFill(d.rep_legal_nombre ?? legalData?.rep_legal_nombre, prefill.rep_legal_nombre),
+        rep_legal_documento: smartFill(d.rep_legal_documento ?? legalData?.rep_legal_documento, prefill.rep_legal_documento),
       }
     })
     setEditing(true)
