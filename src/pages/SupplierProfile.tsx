@@ -1068,7 +1068,7 @@ function DocumentosTab({ supplierId, onExtract }: { supplierId: string | null; o
       uploaded_by: session?.user?.email ?? null,
     })
     setUploading(false)
-    if (dbError) { showToast('Archivo subido pero error al registrar.'); return }
+    if (dbError) { showToast(`Error al registrar: ${dbError.message}`); return }
     setUploadFile(null)
     const input = document.getElementById('doc-file-input') as HTMLInputElement | null
     if (input) input.value = ''
