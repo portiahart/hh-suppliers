@@ -97,7 +97,7 @@ export function computeRetenciones(rut: RUTData): RetencionRecomendada[] {
       tarifa_recomendada: null,
       base_minima: null,
       aplica: true,
-      notas: `CIIU registrados: ${allCIIUs.join(', ')}. Tarifa depende del concepto de cada factura: ${uniqueConcepts.map(conceptLabel).join(' / ')}.`,
+      notas: `Tarifas posibles: ${uniqueConcepts.map(conceptLabel).join(' / ')}.`,
     })
   } else {
     const concepto = uniqueConcepts[0] ?? 'SERVICIOS'
@@ -139,7 +139,7 @@ export function computeRetenciones(rut: RUTData): RetencionRecomendada[] {
       tarifa_recomendada: tarifa,
       base_minima: base,
       aplica: true,
-      notas: `CIIU ${primaryCIIU ?? 'no registrado'}. UVT 2026: ${UVT_2026.toLocaleString('es-CO')} (Decreto 1474/2025).`,
+      notas: `Base mínima $${base.toLocaleString('es-CO')} (UVT 2026: ${UVT_2026.toLocaleString('es-CO')}).`,
     })
   }
 
@@ -158,7 +158,7 @@ export function computeRetenciones(rut: RUTData): RetencionRecomendada[] {
     aplica: !isExentoICA,
     notas: isExentoICA
       ? 'Sector agropecuario exento de ICA en Cartagena.'
-      : `Tarifa ${icaTarifa}% — Cartagena 2026 (confirmado con contador). Base mínima 25% SMLMV 2026 (${BASE_ICA.toLocaleString('es-CO')}).`,
+      : `Base mínima $${BASE_ICA.toLocaleString('es-CO')} (25% SMLMV 2026).`,
   })
 
   // ── ReteIVA ──────────────────────────────────────────────────────────────
@@ -175,7 +175,7 @@ export function computeRetenciones(rut: RUTData): RetencionRecomendada[] {
       tarifa_recomendada: 0,
       base_minima: null,
       aplica: false,
-      notas: 'HH no es gran contribuyente — ReteIVA no aplica sobre pagos a personas jurídicas (Art. 437-2 ET).',
+      notas: 'Agente retenedor no es gran contribuyente — ReteIVA no aplica sobre pagos a personas jurídicas (Art. 437-2 ET).',
     })
   } else if (!isResponsableIVA) {
     results.push({
@@ -202,7 +202,7 @@ export function computeRetenciones(rut: RUTData): RetencionRecomendada[] {
       tarifa_recomendada: 15,
       base_minima: BASE_2_UVT,
       aplica: true,
-      notas: 'Persona natural no declarante, responsable de IVA, servicio gravado — retener 15% del IVA (Art. 437-2 ET).',
+      notas: 'Retener 15% del IVA facturado (Art. 437-2 ET).',
     })
   } else {
     results.push({
@@ -211,7 +211,7 @@ export function computeRetenciones(rut: RUTData): RetencionRecomendada[] {
       tarifa_recomendada: 0,
       base_minima: null,
       aplica: false,
-      notas: 'HH no es gran contribuyente — ReteIVA no aplica sobre servicios de personas naturales declarantes.',
+      notas: 'Agente retenedor no es gran contribuyente — ReteIVA no aplica sobre servicios de personas naturales declarantes.',
     })
   }
 
