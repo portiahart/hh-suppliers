@@ -1066,7 +1066,7 @@ function DocumentosTab({ supplierId, onExtract }: { supplierId: string | null; o
       file_name:       uploadFile.name,
       file_size_bytes: uploadFile.size,
       mime_type:       uploadFile.type,
-      uploaded_by:     session?.user?.email ?? null,
+      uploaded_by:     session?.user?.id ?? null,
     })
     setUploading(false)
     if (dbError) { showToast(`Error al registrar: ${dbError.message}`); return }
