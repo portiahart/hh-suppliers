@@ -642,12 +642,6 @@ async function upsertRetenciones(supplierId: string, recommendations: RetencionR
   }
 }
 
-const ZONE_COLORS: Record<string, { bg: string; text: string }> = {
-  Cartagena: { bg: 'var(--hh-teal)',  text: '#fff' },
-  Bolivar:   { bg: 'var(--hh-lemon)', text: 'var(--hh-dark)' },
-  Colombia:  { bg: 'var(--hh-haze)',  text: '#fff' },
-  ROW:       { bg: 'var(--hh-dark)',  text: 'var(--hh-ice)' },
-}
 
 async function updateLegalFromRUT(supplierId: string, rut: RUTData): Promise<void> {
   const allCIIUs = [
