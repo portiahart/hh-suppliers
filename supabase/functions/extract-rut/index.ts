@@ -49,7 +49,10 @@ Deno.serve(async (req: Request) => {
     const pdfRes = await fetch(url)
     if (!pdfRes.ok) throw new Error(`Failed to fetch PDF: ${pdfRes.status}`)
     const pdfBuffer = await pdfRes.arrayBuffer()
-    const base64 = btoa(String.fromCharCode(...new Uint8Array(pdfBuffer)))
+    const uint8 = new Uint8Array(pdfBuffer)
+    let binary = ''
+    for (let i = 0; i < uint8.length; i++) binary += String.fromCharCode(uint8[i])
+    const base64 = btoa(binary)
     const mediaType = pdfRes.headers.get('content-type') ?? 'application/pdf'
 
     const prompt = `You are extracting supplier registration data from a Colombian RUT (Registro Único Tributario) or Cámara de Comercio document.
@@ -124,7 +127,7 @@ Return only the JSON object, no explanation or markdown.`
   } catch (e) {
     return new Response(
       JSON.stringify({ success: false, error: e instanceof Error ? e.message : String(e) }),
-      { status: 500, headers },
+      { status: 200, headers },
     )
   }
 })
