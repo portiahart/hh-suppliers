@@ -1,7 +1,7 @@
 /**
  * extract-rut
- * Accepts a Supabase Storage signed URL (or path) for a RUT or Cámara de Comercio PDF,
- * fetches the file, sends it to Claude, and returns structured supplier fields.
+ * Accepts a Supabase Storage signed URL for a RUT or Cámara de Comercio PDF,
+ * fetches the file, sends it to Gemini Flash, and returns structured supplier fields.
  *
  * Body: { url: string }  — a signed URL to the PDF
  * Returns: { success: true, fields: ExtractedFields } | { success: false, error: string }
@@ -39,8 +39,8 @@ Deno.serve(async (req: Request) => {
   const headers = { ...corsHeaders(req), 'Content-Type': 'application/json' }
 
   try {
-    const anthropicKey = Deno.env.get('ANTHROPIC_API_KEY')
-    if (!anthropicKey) throw new Error('ANTHROPIC_API_KEY not configured')
+    const googleKey = Deno.env.get('GOOGLE_AI_API_KEY')
+    if (!googleKey) throw new Error('GOOGLE_AI_API_KEY not configured')
 
     const { url } = await req.json() as { url: string }
     if (!url) throw new Error('Missing url in request body')
@@ -53,7 +53,7 @@ Deno.serve(async (req: Request) => {
     let binary = ''
     for (let i = 0; i < uint8.length; i++) binary += String.fromCharCode(uint8[i])
     const base64 = btoa(binary)
-    const mediaType = pdfRes.headers.get('content-type') ?? 'application/pdf'
+    const mimeType = pdfRes.headers.get('content-type') ?? 'application/pdf'
 
     const prompt = `You are extracting supplier registration data from a Colombian RUT (Registro Único Tributario) or Cámara de Comercio document.
 
@@ -72,40 +72,30 @@ Extract the following fields and return ONLY a valid JSON object with these exac
 
 Return only the JSON object, no explanation or markdown.`
 
-    const claudeRes = await fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-api-key': anthropicKey,
-        'anthropic-version': '2023-06-01',
+    const geminiRes = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${googleKey}`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          contents: [{
+            parts: [
+              { inline_data: { mime_type: mimeType, data: base64 } },
+              { text: prompt },
+            ],
+          }],
+          generationConfig: { temperature: 0, maxOutputTokens: 512 },
+        }),
       },
-      body: JSON.stringify({
-        model: 'claude-sonnet-4-6',
-        max_tokens: 512,
-        messages: [{
-          role: 'user',
-          content: [
-            {
-              type: 'document',
-              source: {
-                type: 'base64',
-                media_type: mediaType,
-                data: base64,
-              },
-            },
-            { type: 'text', text: prompt },
-          ],
-        }],
-      }),
-    })
+    )
 
-    if (!claudeRes.ok) {
-      const body = await claudeRes.text()
-      throw new Error(`Claude API error (${claudeRes.status}): ${body}`)
+    if (!geminiRes.ok) {
+      const body = await geminiRes.text()
+      throw new Error(`Gemini API error (${geminiRes.status}): ${body}`)
     }
 
-    const claudeData = await claudeRes.json()
-    const rawText: string = claudeData.content?.[0]?.text ?? ''
+    const geminiData = await geminiRes.json()
+    const rawText: string = geminiData.candidates?.[0]?.content?.parts?.[0]?.text ?? ''
 
     // Strip any markdown code fences if present
     const jsonText = rawText.replace(/^```[a-z]*\n?/i, '').replace(/\n?```$/, '').trim()
