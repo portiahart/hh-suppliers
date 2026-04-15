@@ -1048,25 +1048,27 @@ function DocumentosTab({ supplierId, onExtract }: { supplierId: string | null; o
       return
     }
     setUploading(true)
-    const fileBase64 = await new Promise<string>((resolve, reject) => {
-      const reader = new FileReader()
-      reader.onload = () => resolve((reader.result as string).split(',')[1])
-      reader.onerror = reject
-      reader.readAsDataURL(uploadFile)
-    })
-    const { data: res, error: fnErr } = await supabase.functions.invoke('upload-document', {
-      body: {
-        fileBase64,
-        fileName:     uploadFile.name,
-        mimeType:     uploadFile.type,
-        fileSize:     uploadFile.size,
-        supplierId,
-        documentType: uploadType,
-        uploadedBy:   session?.user?.email ?? null,
-      },
+    const slugify = (s: string) => s.normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-zA-Z0-9._-]/g, '_')
+    const storagePath = `${supplierId}/${slugify(uploadType)}/${slugify(uploadFile.name)}`
+    const { error: uploadError } = await supabase.storage
+      .from('supplier-documents')
+      .upload(storagePath, uploadFile, { upsert: true })
+    if (uploadError) {
+      setUploading(false)
+      showToast(`Error al subir: ${uploadError.message}`)
+      return
+    }
+    const { error: dbError } = await supabase.from('suppliers_documents').insert({
+      supplier_id:     supplierId,
+      document_type:   uploadType,
+      storage_path:    storagePath,
+      file_name:       uploadFile.name,
+      file_size_bytes: uploadFile.size,
+      mime_type:       uploadFile.type,
+      uploaded_by:     session?.user?.email ?? null,
     })
     setUploading(false)
-    if (fnErr || !res?.success) { showToast(`Error al subir: ${fnErr?.message ?? res?.error ?? 'Error desconocido'}`); return }
+    if (dbError) { showToast(`Error al registrar: ${dbError.message}`); return }
     setUploadFile(null)
     const input = document.getElementById('doc-file-input') as HTMLInputElement | null
     if (input) input.value = ''
