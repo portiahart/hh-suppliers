@@ -1520,7 +1520,7 @@ function DocumentosTab({ supplierId, onExtract }: { supplierId: string | null; o
       .upload(storagePath, uploadFile, { upsert: true })
     if (uploadError) {
       setUploading(false)
-      showToast('Error al subir el archivo.')
+      showToast(`Error al subir: ${uploadError.message}`)
       return
     }
     const { error: dbError } = await supabase.from('suppliers_documents').insert({
