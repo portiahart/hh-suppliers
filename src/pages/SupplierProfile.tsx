@@ -189,10 +189,10 @@ function titleCase(s: string | null | undefined): string | null {
 }
 
 // Generic: keep existing if non-empty and normalised values match; otherwise use extracted
-function smartFill(existing: string | null | undefined, extracted: string | null | undefined): string | null {
+function smartFill(existing: string | null | undefined, extracted: string | null | undefined, raw = false): string | null {
   if (!extracted) return existing ?? null
-  if (!existing)  return titleCase(extracted)
-  return normStr(existing) === normStr(extracted) ? existing : titleCase(extracted)
+  if (!existing)  return raw ? extracted : titleCase(extracted)
+  return normStr(existing) === normStr(extracted) ? existing : (raw ? extracted : titleCase(extracted))
 }
 
 // Phone: strip to digits, compare last 10 (ignore +57 prefix differences)
@@ -294,7 +294,7 @@ function IdentidadLegalCard({ supplier, loading, supplierId, onUpdate, prefill, 
     setDraft({
       ...base,
       tipo_persona:        smartFill(base.tipo_persona, prefill.tipo_persona)               ?? base.tipo_persona,
-      email:               smartFill(base.email, prefill.email)                             ?? base.email,
+      email:               smartFill(base.email, prefill.email?.toLowerCase() ?? null, true) ?? base.email,
       telefono:            smartFillPhone(base.telefono, prefill.telefono)                  ?? base.telefono,
       codigo_tributario:   smartFill(base.codigo_tributario, prefill.codigo_tributario),
       ciiu:                smartFill(base.ciiu, prefill.ciiu),
@@ -1062,6 +1062,7 @@ const DOC_TYPES = [
   'Cédula Rep. Legal',
   'Certificado Bancario',
   'Certificación Ambiental',
+  'Contrato o Acuerdo',
   'Otro',
 ] as const
 
