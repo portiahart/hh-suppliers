@@ -579,7 +579,7 @@ interface LegalData {
 interface Retencion {
   id: string
   supplier_id: string
-  tipo: string
+  retencion_tipo: string
   concepto: string | null
   tarifa_recomendada: number | null
   base_minima: number | null
@@ -616,16 +616,16 @@ function enrichRecommendations(recommendations: RetencionRecomendada[], rut: RUT
 async function upsertRetenciones(supplierId: string, recommendations: RetencionRecomendada[]): Promise<void> {
   const { data: existing, error: fetchErr } = await supabase
     .from('suppliers_retenciones')
-    .select('id, tipo, tarifa_aplicada')
+    .select('id, retencion_tipo, tarifa_aplicada')
     .eq('supplier_id', supplierId)
   if (fetchErr) throw new Error(`Error al leer retenciones: ${fetchErr.message}`)
 
   const existingMap = new Map<string, { id: string; tarifa_aplicada: number | null }>()
   for (const row of (existing ?? [])) {
-    existingMap.set(row.tipo, { id: row.id, tarifa_aplicada: row.tarifa_aplicada })
+    existingMap.set(row.retencion_tipo, { id: row.id, tarifa_aplicada: row.tarifa_aplicada })
   }
   for (const rec of recommendations) {
-    const tipo = rec.retencion_tipo
+    const retencion_tipo = rec.retencion_tipo
     const payload = {
       concepto: rec.concepto,
       tarifa_recomendada: rec.tarifa_recomendada,
@@ -634,13 +634,13 @@ async function upsertRetenciones(supplierId: string, recommendations: RetencionR
       notas: rec.notas,
       updated_at: new Date().toISOString(),
     }
-    const existingRow = existingMap.get(tipo)
+    const existingRow = existingMap.get(retencion_tipo)
     if (existingRow) {
       const { error } = await supabase.from('suppliers_retenciones').update(payload).eq('id', existingRow.id)
-      if (error) throw new Error(`Error al actualizar ${tipo}: ${error.message}`)
+      if (error) throw new Error(`Error al actualizar ${retencion_tipo}: ${error.message}`)
     } else {
-      const { error } = await supabase.from('suppliers_retenciones').insert({ supplier_id: supplierId, tipo, tarifa_aplicada: null, ...payload })
-      if (error) throw new Error(`Error al insertar ${tipo}: ${error.message}`)
+      const { error } = await supabase.from('suppliers_retenciones').insert({ supplier_id: supplierId, retencion_tipo, tarifa_aplicada: null, ...payload })
+      if (error) throw new Error(`Error al insertar ${retencion_tipo}: ${error.message}`)
     }
   }
 }
@@ -781,7 +781,7 @@ function RetencionesCard({ supplierId, showToast }: { supplierId: string | null;
     setDraftRows(prev => [...prev, {
       id: tempId,
       supplier_id: supplierId ?? '',
-      tipo: 'RetenFuente',
+      retencion_tipo: 'RetenFuente',
       concepto: null,
       tarifa_recomendada: null,
       base_minima: null,
@@ -805,7 +805,7 @@ function RetencionesCard({ supplierId, showToast }: { supplierId: string | null;
 
       for (const r of existing) {
         await supabase.from('suppliers_retenciones').update({
-          tipo: r.tipo, concepto: r.concepto,
+          retencion_tipo: r.retencion_tipo, concepto: r.concepto,
           tarifa_recomendada: r.tarifa_recomendada, base_minima: r.base_minima,
           tarifa_aplicada: r.tarifa_aplicada, aplica: r.aplica, notas: r.notas,
           updated_at: new Date().toISOString(),
@@ -815,7 +815,7 @@ function RetencionesCard({ supplierId, showToast }: { supplierId: string | null;
       if (added.length > 0) {
         await supabase.from('suppliers_retenciones').insert(added.map(r => ({
           supplier_id: supplierId,
-          tipo: r.tipo, concepto: r.concepto,
+          retencion_tipo: r.retencion_tipo, concepto: r.concepto,
           tarifa_recomendada: r.tarifa_recomendada, base_minima: r.base_minima,
           tarifa_aplicada: r.tarifa_aplicada, aplica: r.aplica, notas: r.notas,
         })))
@@ -918,13 +918,13 @@ function RetencionesCard({ supplierId, showToast }: { supplierId: string | null;
                 <tr key={r.id} style={{ background: idx % 2 === 1 ? 'var(--hh-ice)' : 'var(--hh-white)' }}>
                   <td style={retTdStyle}>
                     {editing ? (
-                      <select value={r.tipo} onChange={e => updateRow(r.id, 'tipo', e.target.value)} style={{ ...inputStyle, width: 'auto' }}>
+                      <select value={r.retencion_tipo} onChange={e => updateRow(r.id, 'retencion_tipo', e.target.value)} style={{ ...inputStyle, width: 'auto' }}>
                         <option>RetenFuente</option>
                         <option>ReteICA</option>
                         <option>ReteIVA</option>
                       </select>
                     ) : (
-                      <span style={{ fontFamily: 'var(--font-body)', fontSize: '0.8125rem', fontWeight: 500 }}>{r.tipo}</span>
+                      <span style={{ fontFamily: 'var(--font-body)', fontSize: '0.8125rem', fontWeight: 500 }}>{r.retencion_tipo}</span>
                     )}
                   </td>
                   <td style={retTdStyle}>
@@ -941,7 +941,7 @@ function RetencionesCard({ supplierId, showToast }: { supplierId: string | null;
                         </span>
                       ) : (
                         <span title={r.notas ?? undefined} style={{ ...retValStyle, color: 'var(--hh-haze)', fontFamily: 'var(--font-numeric)', fontVariantNumeric: 'tabular-nums', cursor: r.notas ? 'help' : 'default' }}>
-                          {r.tarifa_recomendada != null ? `${r.tarifa_recomendada}${r.tipo === 'ReteICA' ? '‰' : '%'}` : <Muted>—</Muted>}
+                          {r.tarifa_recomendada != null ? `${r.tarifa_recomendada}${r.retencion_tipo === 'ReteICA' ? '‰' : '%'}` : <Muted>—</Muted>}
                         </span>
                       )
                     }
@@ -958,7 +958,7 @@ function RetencionesCard({ supplierId, showToast }: { supplierId: string | null;
                           const differs = r.tarifa_aplicada != null && r.tarifa_aplicada !== r.tarifa_recomendada
                           return (
                             <span style={{ ...retValStyle, color: differs ? 'var(--hh-teal)' : undefined, fontFamily: 'var(--font-numeric)', fontVariantNumeric: 'tabular-nums', display: 'inline-flex', alignItems: 'center', gap: 4 }}>
-                              {r.tarifa_aplicada != null ? `${r.tarifa_aplicada}${r.tipo === 'ReteICA' ? '‰' : '%'}` : <Muted>—</Muted>}
+                              {r.tarifa_aplicada != null ? `${r.tarifa_aplicada}${r.retencion_tipo === 'ReteICA' ? '‰' : '%'}` : <Muted>—</Muted>}
                               {differs && <Pencil1Icon width={11} height={11} style={{ opacity: 0.7 }} />}
                             </span>
                           )
