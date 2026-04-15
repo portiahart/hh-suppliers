@@ -513,7 +513,7 @@ function GeneralTab({ supplier, loading, onUpdate, supplierId }: ResumenTabProps
           prefill={prefill}
           onPrefillConsumed={clearPrefill}
         />
-        <TributoriaCard key={analysisKey} supplierId={supplierId} />
+        <TributoriaCard key={analysisKey} supplierId={supplierId} onAnalyzed={onRUTAnalyzed} showToast={showToast} />
         <RetencionesCard key={`ret-${analysisKey}`} supplierId={supplierId} showToast={showToast} />
         <DocumentosTab supplierId={supplierId} onExtract={setPrefill} onRetentionUpdated={onRUTAnalyzed} />
         <AccesoCard supplier={supplier} />
@@ -665,9 +665,10 @@ async function updateLegalFromRUT(supplierId: string, rut: RUTData): Promise<voi
 
 /* ─── Tributaria Card ────────────────────────────────────── */
 
-function TributoriaCard({ supplierId }: { supplierId: string | null }) {
+function TributoriaCard({ supplierId, onAnalyzed, showToast }: { supplierId: string | null; onAnalyzed?: () => void; showToast: (m: string) => void }) {
   const [legalData, setLegalData] = useState<LegalData | null>(null)
   const [loading, setLoading] = useState(true)
+  const [analyzing, setAnalyzing] = useState(false)
 
   useEffect(() => {
     if (!supplierId) { setLoading(false); return }
@@ -678,6 +679,32 @@ function TributoriaCard({ supplierId }: { supplierId: string | null }) {
     })()
   }, [supplierId])
 
+  const handleAnalyze = async () => {
+    if (!supplierId) return
+    setAnalyzing(true)
+    try {
+      const { data: docs } = await supabase
+        .from('suppliers_documents')
+        .select('storage_path')
+        .eq('supplier_id', supplierId)
+        .eq('document_type', 'RUT')
+        .order('id', { ascending: false })
+        .limit(1)
+      if (!docs?.length) throw new Error('No se encontró un RUT subido para este proveedor.')
+      const { data: urlData, error: urlErr } = await supabase.storage.from('supplier-documents').createSignedUrl(docs[0].storage_path, 120)
+      if (urlErr || !urlData?.signedUrl) throw new Error('No se pudo generar enlace para el RUT.')
+      const { data: res, error: fnErr } = await supabase.functions.invoke('extract-rut', { body: { url: urlData.signedUrl } })
+      if (fnErr || !res?.success) throw new Error(fnErr?.message ?? res?.error ?? 'Error al analizar RUT.')
+      const rut = res.rut as RUTData
+      const recommendations = enrichRecommendations(computeRetenciones(rut), rut)
+      await Promise.all([upsertRetenciones(supplierId, recommendations), updateLegalFromRUT(supplierId, rut)])
+      onAnalyzed?.()
+    } catch (e) {
+      showToast(e instanceof Error ? e.message : 'Error al analizar el RUT.')
+    }
+    setAnalyzing(false)
+  }
+
   const ciiuCodes = legalData?.ciiu
     ? legalData.ciiu.split(',').map(s => s.trim()).filter(Boolean)
     : []
@@ -686,14 +713,25 @@ function TributoriaCard({ supplierId }: { supplierId: string | null }) {
     : []
   const hasData = ciiuCodes.length > 0 || respCodes.length > 0
 
+  const analyzeBtn = (
+    <button onClick={handleAnalyze} disabled={analyzing} style={ghostBtnStyle}>
+      {analyzing ? 'Analizando…' : 'Analizar RUT'}
+    </button>
+  )
+
   return (
-    <SectionCard title="Información Tributaria">
+    <SectionCard title="Información Tributaria" action={analyzeBtn}>
       {loading ? (
         <SkeletonFields />
       ) : !hasData ? (
-        <p style={{ fontFamily: 'var(--font-body)', fontWeight: 300, fontSize: '0.875rem', color: 'var(--hh-haze)', margin: 0 }}>
-          Sin información tributaria — analiza el RUT en la sección Documentos para poblar automáticamente.
-        </p>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 12, alignItems: 'flex-start' }}>
+          <p style={{ fontFamily: 'var(--font-body)', fontWeight: 300, fontSize: '0.875rem', color: 'var(--hh-haze)', margin: 0 }}>
+            Sin información tributaria registrada.
+          </p>
+          <button onClick={handleAnalyze} disabled={analyzing} style={{ ...ghostBtnStyle, color: 'var(--hh-teal)', borderColor: 'var(--hh-teal)' }}>
+            {analyzing ? 'Analizando…' : 'Analizar RUT'}
+          </button>
+        </div>
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 28 }}>
           {ciiuCodes.length > 0 && (
@@ -1356,6 +1394,12 @@ function DocumentosTab({ supplierId, onExtract, onRetentionUpdated }: { supplier
       })
       if (fnErr || !res?.success) throw new Error(fnErr?.message ?? res?.error ?? 'Error al extraer datos.')
       onExtract(res.fields as ExtractedFields)
+      if (supplierId && res.rut) {
+        const rut = res.rut as RUTData
+        const recommendations = enrichRecommendations(computeRetenciones(rut), rut)
+        await Promise.all([upsertRetenciones(supplierId, recommendations), updateLegalFromRUT(supplierId, rut)])
+        onRetentionUpdated?.()
+      }
       showToast('Datos extraídos. Revisa y guarda en las secciones de arriba.')
     } catch (e) {
       showToast(e instanceof Error ? e.message : 'Error al extraer datos.')
