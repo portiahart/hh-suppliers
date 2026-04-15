@@ -21,14 +21,16 @@ function corsHeaders(req: Request): Record<string, string> {
 }
 
 interface ExtractedFields {
-  razon_social:      string | null
-  nit:               string | null
-  tipo_persona:      'JURIDICA' | 'NATURAL' | null
-  codigo_tributario: string | null
-  ciiu:              string | null
-  direccion:         string | null
-  ciudad:            string | null
-  pais:              string | null
+  tipo_persona:       'JURIDICA' | 'NATURAL' | null
+  codigo_tributario:  string | null
+  ciiu:               string | null
+  direccion:          string | null
+  ciudad:             string | null
+  pais:               string | null
+  email:              string | null
+  telefono:           string | null
+  rep_legal_nombre:   string | null
+  rep_legal_documento: string | null
 }
 
 Deno.serve(async (req: Request) => {
@@ -60,14 +62,16 @@ Deno.serve(async (req: Request) => {
 Extract the following fields and return ONLY a valid JSON object with these exact keys (use null for any field not found):
 
 {
-  "razon_social": "Full legal company or person name as registered",
-  "nit": "NIT number digits only, no dashes or check digit",
   "tipo_persona": "JURIDICA or NATURAL only",
   "codigo_tributario": "Tax regime / responsabilidades tributarias (e.g. 05, 11-04, etc.)",
   "ciiu": "CIIU economic activity code (numeric only)",
   "direccion": "Full street address",
   "ciudad": "City name only",
-  "pais": "Country name (usually Colombia)"
+  "pais": "Country name (usually Colombia)",
+  "email": "Email address if present",
+  "telefono": "Phone number — always prefix with +57 if Colombian, digits only after that (e.g. +573001234567)",
+  "rep_legal_nombre": "Full name of the legal representative (representante legal) if present",
+  "rep_legal_documento": "ID document number of the legal representative if present"
 }
 
 Return only the JSON object, no explanation or markdown.`
@@ -108,15 +112,17 @@ Return only the JSON object, no explanation or markdown.`
     const parsed = JSON.parse(jsonText) as Record<string, string | null>
 
     const fields: ExtractedFields = {
-      razon_social:      parsed.razon_social ?? null,
-      nit:               parsed.nit ? String(parsed.nit).replace(/\D/g, '') || null : null,
-      tipo_persona:      (parsed.tipo_persona === 'JURIDICA' || parsed.tipo_persona === 'NATURAL')
-                           ? parsed.tipo_persona : null,
-      codigo_tributario: parsed.codigo_tributario ?? null,
-      ciiu:              parsed.ciiu ?? null,
-      direccion:         parsed.direccion ?? null,
-      ciudad:            parsed.ciudad ?? null,
-      pais:              parsed.pais ?? null,
+      tipo_persona:       (parsed.tipo_persona === 'JURIDICA' || parsed.tipo_persona === 'NATURAL')
+                            ? parsed.tipo_persona : null,
+      codigo_tributario:  parsed.codigo_tributario ?? null,
+      ciiu:               parsed.ciiu ?? null,
+      direccion:          parsed.direccion ?? null,
+      ciudad:             parsed.ciudad ?? null,
+      pais:               parsed.pais ?? null,
+      email:              parsed.email ?? null,
+      telefono:           parsed.telefono ?? null,
+      rep_legal_nombre:   parsed.rep_legal_nombre ?? null,
+      rep_legal_documento: parsed.rep_legal_documento ?? null,
     }
 
     return new Response(JSON.stringify({ success: true, fields }), { headers })

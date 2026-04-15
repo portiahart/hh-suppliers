@@ -125,14 +125,16 @@ export function SupplierProfile() {
 /* ─── Shared extracted-fields type ───────────────────────── */
 
 interface ExtractedFields {
-  razon_social:      string | null
-  nit:               string | null
-  tipo_persona:      'JURIDICA' | 'NATURAL' | null
-  codigo_tributario: string | null
-  ciiu:              string | null
-  direccion:         string | null
-  ciudad:            string | null
-  pais:              string | null
+  tipo_persona:        'JURIDICA' | 'NATURAL' | null
+  codigo_tributario:   string | null
+  ciiu:                string | null
+  direccion:           string | null
+  ciudad:              string | null
+  pais:                string | null
+  email:               string | null
+  telefono:            string | null
+  rep_legal_nombre:    string | null
+  rep_legal_documento: string | null
 }
 
 /* ─── Acceso Card ─────────────────────────────────────────── */
@@ -189,6 +191,8 @@ interface IdentidadLegalDraft {
   ciudad: string | null
   pais: string | null
   proximity_zone: string | null
+  rep_legal_nombre: string | null
+  rep_legal_documento: string | null
 }
 
 function IdentidadLegalCard({ supplier, loading, supplierId, onUpdate, prefill, onPrefillConsumed }: {
@@ -208,6 +212,7 @@ function IdentidadLegalCard({ supplier, loading, supplierId, onUpdate, prefill, 
     tipo_persona: '', email: '', telefono: '', status: 'ACTIVE',
     codigo_tributario: null, ciiu: null, direccion: null, ciudad: null,
     pais: 'Colombia', proximity_zone: null,
+    rep_legal_nombre: null, rep_legal_documento: null,
   })
 
   const showToast = (msg: string) => { setToast(msg); setTimeout(() => setToast(null), 3500) }
@@ -230,15 +235,17 @@ function IdentidadLegalCard({ supplier, loading, supplierId, onUpdate, prefill, 
       const ciudad = prefill.ciudad ?? d.ciudad ?? legalData?.ciudad ?? null
       return {
         ...d,
-        razon_social:      prefill.razon_social      ?? d.razon_social      ?? supplier?.razon_social      ?? '',
-        nit:               prefill.nit               ?? d.nit               ?? supplier?.nit               ?? '',
-        tipo_persona:      prefill.tipo_persona      ?? d.tipo_persona      ?? supplier?.tipo_persona      ?? '',
-        codigo_tributario: prefill.codigo_tributario ?? d.codigo_tributario ?? legalData?.codigo_tributario ?? null,
-        ciiu:              prefill.ciiu              ?? d.ciiu              ?? legalData?.ciiu              ?? null,
-        direccion:         prefill.direccion         ?? d.direccion         ?? legalData?.direccion         ?? null,
+        tipo_persona:        prefill.tipo_persona        ?? d.tipo_persona        ?? supplier?.tipo_persona      ?? '',
+        email:               prefill.email               ?? d.email               ?? supplier?.email              ?? '',
+        telefono:            prefill.telefono             ?? d.telefono             ?? supplier?.telefono           ?? '',
+        codigo_tributario:   prefill.codigo_tributario   ?? d.codigo_tributario   ?? legalData?.codigo_tributario ?? null,
+        ciiu:                prefill.ciiu                ?? d.ciiu                ?? legalData?.ciiu              ?? null,
+        direccion:           prefill.direccion           ?? d.direccion           ?? legalData?.direccion         ?? null,
         ciudad,
-        pais:              prefill.pais              ?? d.pais              ?? legalData?.pais              ?? 'Colombia',
-        proximity_zone:    ciudad ? computeZone(ciudad) : d.proximity_zone ?? legalData?.proximity_zone ?? null,
+        pais:                prefill.pais                ?? d.pais                ?? legalData?.pais              ?? 'Colombia',
+        proximity_zone:      ciudad ? computeZone(ciudad) : d.proximity_zone ?? legalData?.proximity_zone ?? null,
+        rep_legal_nombre:    prefill.rep_legal_nombre    ?? d.rep_legal_nombre    ?? legalData?.rep_legal_nombre    ?? null,
+        rep_legal_documento: prefill.rep_legal_documento ?? d.rep_legal_documento ?? legalData?.rep_legal_documento ?? null,
       }
     })
     setEditing(true)
@@ -250,20 +257,22 @@ function IdentidadLegalCard({ supplier, loading, supplierId, onUpdate, prefill, 
     if (!supplier) return
     const ciudad = legalData?.ciudad ?? null
     setDraft({
-      razon_social:      supplier.razon_social      ?? '',
-      nombre_operativo:  supplier.nombre_operativo  ?? '',
-      nit:               supplier.nit               ?? '',
-      documento_tipo:    supplier.documento_tipo     ?? '',
-      tipo_persona:      supplier.tipo_persona       ?? '',
-      email:             supplier.email              ?? '',
-      telefono:          supplier.telefono           ?? '',
-      status:            supplier.status,
-      codigo_tributario: legalData?.codigo_tributario ?? null,
-      ciiu:              legalData?.ciiu              ?? null,
-      direccion:         legalData?.direccion         ?? null,
+      razon_social:        supplier.razon_social      ?? '',
+      nombre_operativo:    supplier.nombre_operativo  ?? '',
+      nit:                 supplier.nit               ?? '',
+      documento_tipo:      supplier.documento_tipo     ?? '',
+      tipo_persona:        supplier.tipo_persona       ?? '',
+      email:               supplier.email              ?? '',
+      telefono:            supplier.telefono           ?? '',
+      status:              supplier.status,
+      codigo_tributario:   legalData?.codigo_tributario ?? null,
+      ciiu:                legalData?.ciiu              ?? null,
+      direccion:           legalData?.direccion         ?? null,
       ciudad,
-      pais:              legalData?.pais              ?? 'Colombia',
-      proximity_zone:    legalData?.proximity_zone    ?? null,
+      pais:                legalData?.pais              ?? 'Colombia',
+      proximity_zone:      legalData?.proximity_zone    ?? null,
+      rep_legal_nombre:    legalData?.rep_legal_nombre    ?? null,
+      rep_legal_documento: legalData?.rep_legal_documento ?? null,
     })
     setEditing(true)
   }
@@ -282,6 +291,7 @@ function IdentidadLegalCard({ supplier, loading, supplierId, onUpdate, prefill, 
     if (!supplierId || !supplier) return
     setSaving(true)
     const { codigo_tributario, ciiu, direccion, ciudad, pais, proximity_zone,
+            rep_legal_nombre, rep_legal_documento,
             razon_social, nombre_operativo, nit, documento_tipo, tipo_persona, email, telefono, status } = draft
 
     // Save supplier fields
@@ -294,7 +304,7 @@ function IdentidadLegalCard({ supplier, loading, supplierId, onUpdate, prefill, 
     if (suppErr) { setSaving(false); showToast('Error al guardar.'); return }
 
     // Save legal fields
-    const legalPayload = { supplier_id: supplierId, codigo_tributario, ciiu, direccion, ciudad, pais, proximity_zone, updated_at: new Date().toISOString() }
+    const legalPayload = { supplier_id: supplierId, codigo_tributario, ciiu, direccion, ciudad, pais, proximity_zone, rep_legal_nombre, rep_legal_documento, updated_at: new Date().toISOString() }
     if (legalData?.id) {
       const { data: ld, error: lErr } = await supabase.from('suppliers_legal').update(legalPayload).eq('id', legalData.id).select().single()
       if (lErr) { setSaving(false); showToast('Error al guardar datos legales.'); return }
@@ -356,9 +366,6 @@ function IdentidadLegalCard({ supplier, loading, supplierId, onUpdate, prefill, 
             <Field label="NIT"
               value={editing ? draft.nit : (supplier?.nit ?? null)}
               editing={editing} onChange={v => setField('nit', v)} />
-            <Field label="Tipo de Documento"
-              value={editing ? draft.documento_tipo : (supplier?.documento_tipo ?? null)}
-              editing={editing} onChange={v => setField('documento_tipo', v)} />
             <div>
               <p style={labelStyle}>Tipo de Persona</p>
               {editing ? (
@@ -416,6 +423,12 @@ function IdentidadLegalCard({ supplier, loading, supplierId, onUpdate, prefill, 
             <Field label="País"
               value={editing ? (draft.pais ?? 'Colombia') : (legalData?.pais ?? 'Colombia')}
               editing={editing} onChange={v => setField('pais', v || null)} />
+            <Field label="Representante Legal"
+              value={editing ? (draft.rep_legal_nombre ?? '') : (legalData?.rep_legal_nombre ?? null)}
+              editing={editing} onChange={v => setField('rep_legal_nombre', v || null)} />
+            <Field label="Doc. Representante Legal"
+              value={editing ? (draft.rep_legal_documento ?? '') : (legalData?.rep_legal_documento ?? null)}
+              editing={editing} onChange={v => setField('rep_legal_documento', v || null)} />
             <div>
               <p style={labelStyle}>Zona de Proximidad</p>
               {zone && zoneColor ? (
@@ -516,6 +529,8 @@ interface LegalData {
   ciudad: string | null
   pais: string | null
   proximity_zone: string | null
+  rep_legal_nombre: string | null
+  rep_legal_documento: string | null
 }
 
 
