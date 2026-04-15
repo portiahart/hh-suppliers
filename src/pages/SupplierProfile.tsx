@@ -518,7 +518,6 @@ interface LegalData {
   proximity_zone: string | null
 }
 
-type LegalDraft = Omit<LegalData, 'id' | 'supplier_id'> & { tipo_persona: string | null }
 
 interface Retencion {
   id: string
