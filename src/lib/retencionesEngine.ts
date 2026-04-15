@@ -5,7 +5,7 @@ type ConceptoFuente = 'COMPRAS' | 'SERVICIOS' | 'HONORARIOS' | 'TRANSPORTE_CARGA
 function getCIIUConcept(ciiu: string): ConceptoFuente {
   const s = ciiu.slice(0, 2)
   const n = parseInt(s)
-  if (n >= 1 && n <= 3)   return 'COMPRAS'
+  if (n >= 1  && n <= 3)  return 'COMPRAS'
   if (n >= 10 && n <= 33) return 'COMPRAS'
   if (n >= 41 && n <= 43) return 'CONTRATOS_CONSTRUCCION'
   if (n >= 45 && n <= 47) return 'COMPRAS'
@@ -29,30 +29,28 @@ function conceptLabel(c: ConceptoFuente): string {
   return m[c]
 }
 
-const ICA_TARIFAS: Record<string, number> = {
-  '01': 0, '02': 0, '03': 0,
-  '10': 3.5, '11': 3.5, '12': 3.5, '13': 3.5, '14': 3.5,
-  '15': 3.5, '16': 3.5, '17': 3.5, '18': 3.5, '19': 3.5,
-  '20': 3.5, '21': 3.5, '22': 3.5, '23': 3.5, '24': 3.5,
-  '25': 3.5, '26': 3.5, '27': 3.5, '28': 3.5, '29': 3.5,
-  '30': 3.5, '31': 3.5, '32': 3.5, '33': 3.5,
-  '41': 3.5, '42': 3.5, '43': 3.5,
-  '45': 4.14, '46': 4.14, '47': 4.14,
-  '49': 4.14, '50': 4.14, '51': 4.14, '52': 4.14, '53': 4.14,
-  '55': 4.14, '56': 4.14,
-  '58': 4.83, '59': 4.83, '60': 4.83, '61': 4.83, '62': 4.83, '63': 4.83,
-  '64': 5.0,  '65': 5.0,  '66': 5.0,
-  '68': 5.0,
-  '69': 4.83, '70': 4.83, '71': 4.83, '72': 4.83, '73': 4.83, '74': 4.83, '75': 4.83,
-  '77': 4.83, '78': 4.83, '79': 4.83, '80': 4.83, '81': 4.83, '82': 4.83,
-  '85': 4.14, '86': 4.14, '87': 4.14, '88': 4.14,
-  '90': 9.66, '91': 9.66, '92': 9.66, '93': 9.66,
+// ─── Cartagena ReteICA 2026 ───────────────────────────────────────────────────
+// Rates confirmed by accountant. Stored as percentages (%).
+// ⚠️ To update: change these two constants only.
+const ICA_SERVICIOS = 0.856  // % — all service activities
+const ICA_PRODUCTOS = 0.7    // % — commercial, industrial, construction, transport
+                              // ⚠️ confirm exact value with accountant
+
+function getICATarifa(ciiu: string): number {
+  const s = ciiu.slice(0, 2)
+  const n = parseInt(s)
+  if (n >= 1  && n <= 3)  return 0              // Agropecuario — exento
+  if (n >= 10 && n <= 53) return ICA_PRODUCTOS  // Industrial, construcción, comercio, transporte
+  if (s === '55' || s === '56') return ICA_PRODUCTOS  // Alojamiento y restaurantes
+  return ICA_SERVICIOS
 }
 
-const UVT_2026    = 49799
-const BASE_10_UVT = UVT_2026 * 10   // 497,990
-const BASE_2_UVT  = UVT_2026 * 2    //  99,598
-const BASE_ICA    = 437726           // 25% SMLMV 2026
+// ─── 2026 constants ───────────────────────────────────────────────────────────
+// Source: Decreto 1474 del 29 diciembre 2025
+const UVT_2026    = 52374
+const BASE_10_UVT = UVT_2026 * 10  // $523,740 — compras, construcción
+const BASE_2_UVT  = UVT_2026 * 2   // $104,748 — servicios, transporte
+const BASE_ICA    = 437726         // 25% SMLMV 2026
 
 export function computeRetenciones(rut: RUTData): RetencionRecomendada[] {
   const results: RetencionRecomendada[] = []
@@ -61,6 +59,7 @@ export function computeRetenciones(rut: RUTData): RetencionRecomendada[] {
   const isAutorretenedor = rut.autorretenedor  || rut.responsabilidades.includes('15')
   const isDeclarante     = rut.declarante_renta || rut.tipo_persona === 'JURIDICA' || rut.responsabilidades.includes('05')
   const isResponsableIVA = rut.responsable_iva  || rut.responsabilidades.includes('48')
+  const isJuridica       = rut.tipo_persona === 'JURIDICA'
 
   const allCIIUs = [
     rut.actividad_principal?.codigo,
@@ -68,11 +67,11 @@ export function computeRetenciones(rut: RUTData): RetencionRecomendada[] {
     ...(rut.otras_actividades ?? [])
   ].filter(Boolean) as string[]
 
-  const primaryCIIU     = rut.actividad_principal?.codigo ?? allCIIUs[0] ?? null
-  const uniqueConcepts  = [...new Set(allCIIUs.map(getCIIUConcept))]
-  const multiConcepts   = uniqueConcepts.length > 1
+  const primaryCIIU    = rut.actividad_principal?.codigo ?? allCIIUs[0] ?? null
+  const uniqueConcepts = [...new Set(allCIIUs.map(getCIIUConcept))]
+  const multiConcepts  = uniqueConcepts.length > 1
 
-  // ── Retefuente ──────────────────────────────────────────────────────────
+  // ── RetenFuente ──────────────────────────────────────────────────────────
   if (isSIMPLE) {
     results.push({
       retencion_tipo: 'Retefuente',
@@ -105,61 +104,114 @@ export function computeRetenciones(rut: RUTData): RetencionRecomendada[] {
     let tarifa: number, base: number, label: string
     switch (concepto) {
       case 'COMPRAS':
-        tarifa = isDeclarante ? 2.5 : 3.5; base = BASE_10_UVT
-        label = `Compras — ${isDeclarante ? 'declarante' : 'no declarante'}`; break
+        tarifa = isDeclarante ? 2.5 : 3.5
+        base = BASE_10_UVT
+        label = `Compras — ${isDeclarante ? 'declarante' : 'no declarante'}`
+        break
       case 'HONORARIOS':
-        tarifa = rut.tipo_persona === 'JURIDICA' ? 11 : 10; base = 0
-        label = `Honorarios — persona ${rut.tipo_persona === 'JURIDICA' ? 'jurídica' : 'natural'}`; break
+        tarifa = isJuridica ? 11 : 10
+        base = 0
+        label = `Honorarios — persona ${isJuridica ? 'jurídica' : 'natural'}`
+        break
       case 'TRANSPORTE_CARGA':
-        tarifa = 1; base = BASE_2_UVT; label = 'Transporte de carga'; break
+        tarifa = 1
+        base = BASE_2_UVT
+        label = 'Transporte de carga'
+        break
       case 'ARRENDAMIENTO':
-        tarifa = 4; base = 0; label = 'Arrendamiento bienes muebles'; break
+        tarifa = 4
+        base = 0
+        label = 'Arrendamiento bienes muebles'
+        break
       case 'CONTRATOS_CONSTRUCCION':
-        tarifa = 2; base = BASE_10_UVT; label = 'Contratos de construcción'; break
+        tarifa = 2
+        base = BASE_10_UVT
+        label = 'Contratos de construcción'
+        break
       default:
-        tarifa = isDeclarante ? 4 : 6; base = BASE_2_UVT
+        tarifa = isDeclarante ? 4 : 6
+        base = BASE_2_UVT
         label = `Servicios generales — ${isDeclarante ? 'declarante' : 'no declarante'}`
     }
     results.push({
-      retencion_tipo: 'Retefuente', concepto: label,
-      tarifa_recomendada: tarifa, base_minima: base, aplica: true,
-      notas: `CIIU ${primaryCIIU ?? 'no registrado'}. UVT 2026: ${UVT_2026.toLocaleString('es-CO')}.`,
+      retencion_tipo: 'Retefuente',
+      concepto: label,
+      tarifa_recomendada: tarifa,
+      base_minima: base,
+      aplica: true,
+      notas: `CIIU ${primaryCIIU ?? 'no registrado'}. UVT 2026: ${UVT_2026.toLocaleString('es-CO')} (Decreto 1474/2025).`,
     })
   }
 
   // ── ReteICA ──────────────────────────────────────────────────────────────
-  const icaSection   = primaryCIIU?.slice(0, 2) ?? null
-  const icaTarifa    = icaSection ? (ICA_TARIFAS[icaSection] ?? 4.14) : 4.14
-  const isExentoICA  = icaSection !== null && ['01','02','03'].includes(icaSection)
+  const icaSection  = primaryCIIU?.slice(0, 2) ?? null
+  const isExentoICA = icaSection !== null && parseInt(icaSection) >= 1 && parseInt(icaSection) <= 3
+  const icaTarifa   = primaryCIIU ? getICATarifa(primaryCIIU) : ICA_SERVICIOS
+
   results.push({
     retencion_tipo: 'ReteICA',
-    concepto: isExentoICA ? 'No aplica — actividad agropecuaria' : `Cartagena — CIIU ${primaryCIIU ?? 'no registrado'}`,
+    concepto: isExentoICA
+      ? 'No aplica — actividad agropecuaria'
+      : `Cartagena — CIIU ${primaryCIIU ?? 'no registrado'}`,
     tarifa_recomendada: isExentoICA ? 0 : icaTarifa,
     base_minima: isExentoICA ? null : BASE_ICA,
     aplica: !isExentoICA,
     notas: isExentoICA
       ? 'Sector agropecuario exento de ICA en Cartagena.'
-      : `Tarifa en ‰ — Acuerdo 41/2006. Base mínima 25% SMLMV 2026 (${BASE_ICA.toLocaleString('es-CO')}). Verificar autorretenedor ICA con Secretaría de Hacienda Distrital por separado.`,
+      : `Tarifa ${icaTarifa}% — Cartagena 2026 (confirmado con contador). Base mínima 25% SMLMV 2026 (${BASE_ICA.toLocaleString('es-CO')}).`,
   })
 
   // ── ReteIVA ──────────────────────────────────────────────────────────────
-  if (!isResponsableIVA) {
-    results.push({
-      retencion_tipo: 'ReteIVA', concepto: 'No aplica — no responsable de IVA',
-      tarifa_recomendada: 0, base_minima: null, aplica: false,
-      notas: 'Proveedor no responsable de IVA — no factura IVA.',
-    })
-  } else {
-    const isGoods = (uniqueConcepts[0] ?? 'SERVICIOS') === 'COMPRAS'
+  // HH is NOT gran contribuyente.
+  // Rule (Art. 437-2 ET): ReteIVA only applies when paying a persona natural
+  // no declarante for an IVA-taxed service. Never applies to personas jurídicas.
+  const primaryConcept = uniqueConcepts[0] ?? 'SERVICIOS'
+  const isIVAExcluded  = primaryConcept === 'COMPRAS' || primaryConcept === 'TRANSPORTE_CARGA'
+
+  if (isJuridica) {
     results.push({
       retencion_tipo: 'ReteIVA',
-      concepto: isGoods ? 'No aplica — compra de bienes' : '15% del IVA facturado',
-      tarifa_recomendada: isGoods ? 0 : 15,
+      concepto: 'No aplica — proveedor persona jurídica',
+      tarifa_recomendada: 0,
       base_minima: null,
-      aplica: !isGoods,
-      notas: isGoods
-        ? 'ReteIVA no aplica en compra de bienes.'
-        : 'HH no es gran contribuyente. Aplica sobre servicios gravados — verificar caso a caso.',
+      aplica: false,
+      notas: 'HH no es gran contribuyente — ReteIVA no aplica sobre pagos a personas jurídicas (Art. 437-2 ET).',
+    })
+  } else if (!isResponsableIVA) {
+    results.push({
+      retencion_tipo: 'ReteIVA',
+      concepto: 'No aplica — no responsable de IVA',
+      tarifa_recomendada: 0,
+      base_minima: null,
+      aplica: false,
+      notas: 'Proveedor no responsable de IVA.',
+    })
+  } else if (isIVAExcluded) {
+    results.push({
+      retencion_tipo: 'ReteIVA',
+      concepto: 'No aplica — actividad excluida de IVA',
+      tarifa_recomendada: 0,
+      base_minima: null,
+      aplica: false,
+      notas: 'Compras de bienes y transporte generalmente excluidos de IVA (Art. 476 ET).',
+    })
+  } else if (!isDeclarante) {
+    results.push({
+      retencion_tipo: 'ReteIVA',
+      concepto: '15% del IVA facturado',
+      tarifa_recomendada: 15,
+      base_minima: BASE_2_UVT,
+      aplica: true,
+      notas: 'Persona natural no declarante, responsable de IVA, servicio gravado — retener 15% del IVA (Art. 437-2 ET).',
+    })
+  } else {
+    results.push({
+      retencion_tipo: 'ReteIVA',
+      concepto: 'No aplica — persona natural declarante',
+      tarifa_recomendada: 0,
+      base_minima: null,
+      aplica: false,
+      notas: 'HH no es gran contribuyente — ReteIVA no aplica sobre servicios de personas naturales declarantes.',
     })
   }
 
