@@ -182,11 +182,17 @@ function normStr(s: string | null | undefined): string {
   return s.toLowerCase().replace(/[^a-z0-9\s]/g, ' ').replace(/\s+/g, ' ').trim()
 }
 
+// Title-case an ALL-CAPS string from a RUT document
+function titleCase(s: string | null | undefined): string | null {
+  if (!s) return null
+  return s.toLowerCase().replace(/\b\w/g, c => c.toUpperCase())
+}
+
 // Generic: keep existing if non-empty and normalised values match; otherwise use extracted
 function smartFill(existing: string | null | undefined, extracted: string | null | undefined): string | null {
   if (!extracted) return existing ?? null
-  if (!existing)  return extracted
-  return normStr(existing) === normStr(extracted) ? existing : extracted
+  if (!existing)  return titleCase(extracted)
+  return normStr(existing) === normStr(extracted) ? existing : titleCase(extracted)
 }
 
 // Phone: strip to digits, compare last 10 (ignore +57 prefix differences)
@@ -200,12 +206,12 @@ function smartFillPhone(existing: string | null | undefined, extracted: string |
 // Address: token-overlap ≥ 70% → treat as same (RUT addresses are notoriously inconsistent)
 function smartFillAddress(existing: string | null | undefined, extracted: string | null | undefined): string | null {
   if (!extracted) return existing ?? null
-  if (!existing)  return extracted
+  if (!existing)  return titleCase(extracted)
   const tokens = (s: string) => new Set(normStr(s).split(' ').filter(t => t.length > 1))
   const a = tokens(existing), b = tokens(extracted)
   const overlap = [...a].filter(t => b.has(t)).length
   const similarity = overlap / Math.max(a.size, b.size, 1)
-  return similarity >= 0.7 ? existing : extracted
+  return similarity >= 0.7 ? existing : titleCase(extracted)
 }
 
 /* ─── IdentidadLegal Card (merged) ───────────────────────── */
@@ -264,24 +270,40 @@ function IdentidadLegalCard({ supplier, loading, supplierId, onUpdate, prefill, 
   }, [supplierId])
 
   useEffect(() => {
-    if (!prefill) return
-    setDraft(d => {
-      const existingCiudad = d.ciudad ?? legalData?.ciudad ?? null
-      const ciudad = smartFill(existingCiudad, prefill.ciudad)
-      return {
-        ...d,
-        tipo_persona:        smartFill(d.tipo_persona || supplier?.tipo_persona, prefill.tipo_persona) ?? d.tipo_persona ?? '',
-        email:               smartFill(d.email || supplier?.email, prefill.email) ?? d.email ?? '',
-        telefono:            smartFillPhone(d.telefono || supplier?.telefono, prefill.telefono) ?? d.telefono ?? '',
-        codigo_tributario:   smartFill(d.codigo_tributario ?? legalData?.codigo_tributario, prefill.codigo_tributario),
-        ciiu:                smartFill(d.ciiu ?? legalData?.ciiu, prefill.ciiu),
-        direccion:           smartFillAddress(d.direccion ?? legalData?.direccion, prefill.direccion),
-        ciudad,
-        pais:                smartFill(d.pais ?? legalData?.pais, prefill.pais) ?? 'Colombia',
-        proximity_zone:      ciudad ? computeZone(ciudad) : d.proximity_zone ?? legalData?.proximity_zone ?? null,
-        rep_legal_nombre:    smartFill(d.rep_legal_nombre ?? legalData?.rep_legal_nombre, prefill.rep_legal_nombre),
-        rep_legal_documento: smartFill(d.rep_legal_documento ?? legalData?.rep_legal_documento, prefill.rep_legal_documento),
-      }
+    if (!prefill || !supplier) return
+    // Always seed from supplier + legalData so fields not touched by prefill are never blank
+    const base: IdentidadLegalDraft = {
+      razon_social:        supplier.razon_social      ?? '',
+      nombre_operativo:    supplier.nombre_operativo  ?? '',
+      nit:                 supplier.nit               ?? '',
+      documento_tipo:      supplier.documento_tipo     ?? '',
+      tipo_persona:        supplier.tipo_persona       ?? '',
+      email:               supplier.email              ?? '',
+      telefono:            supplier.telefono           ?? '',
+      status:              supplier.status,
+      codigo_tributario:   legalData?.codigo_tributario ?? null,
+      ciiu:                legalData?.ciiu              ?? null,
+      direccion:           legalData?.direccion         ?? null,
+      ciudad:              legalData?.ciudad            ?? null,
+      pais:                legalData?.pais              ?? 'Colombia',
+      proximity_zone:      legalData?.proximity_zone    ?? null,
+      rep_legal_nombre:    legalData?.rep_legal_nombre    ?? null,
+      rep_legal_documento: legalData?.rep_legal_documento ?? null,
+    }
+    const ciudad = smartFill(base.ciudad, prefill.ciudad)
+    setDraft({
+      ...base,
+      tipo_persona:        smartFill(base.tipo_persona, prefill.tipo_persona)               ?? base.tipo_persona,
+      email:               smartFill(base.email, prefill.email)                             ?? base.email,
+      telefono:            smartFillPhone(base.telefono, prefill.telefono)                  ?? base.telefono,
+      codigo_tributario:   smartFill(base.codigo_tributario, prefill.codigo_tributario),
+      ciiu:                smartFill(base.ciiu, prefill.ciiu),
+      direccion:           smartFillAddress(base.direccion, prefill.direccion),
+      ciudad,
+      pais:                smartFill(base.pais, prefill.pais)                               ?? 'Colombia',
+      proximity_zone:      ciudad ? computeZone(ciudad) : base.proximity_zone,
+      rep_legal_nombre:    smartFill(base.rep_legal_nombre, prefill.rep_legal_nombre),
+      rep_legal_documento: smartFill(base.rep_legal_documento, prefill.rep_legal_documento),
     })
     setEditing(true)
     onPrefillConsumed?.()
