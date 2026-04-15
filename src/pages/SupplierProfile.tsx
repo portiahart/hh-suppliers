@@ -381,9 +381,6 @@ function IdentidadLegalCard({ supplier, loading, supplierId, onUpdate, prefill, 
     showToast('Cambios guardados.')
   }
 
-  const zone = editing ? (draft.proximity_zone ?? '') : (legalData?.proximity_zone ?? '')
-  const zoneColor = zone ? ZONE_COLORS[zone] : null
-
   return (
     <>
       {toast && (
