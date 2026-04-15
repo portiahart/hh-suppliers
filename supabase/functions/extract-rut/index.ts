@@ -1,7 +1,7 @@
 /**
  * extract-rut
  * Accepts a Supabase Storage signed URL for a RUT or Cámara de Comercio PDF,
- * fetches the file, sends it to Gemini Flash, and returns structured supplier fields.
+ * fetches the file, sends it to Claude, and returns structured supplier fields.
  *
  * Body: { url: string }  — a signed URL to the PDF
  * Returns: { success: true, fields: ExtractedFields } | { success: false, error: string }
@@ -39,8 +39,8 @@ Deno.serve(async (req: Request) => {
   const headers = { ...corsHeaders(req), 'Content-Type': 'application/json' }
 
   try {
-    const googleKey = Deno.env.get('GOOGLE_AI_API_KEY')
-    if (!googleKey) throw new Error('GOOGLE_AI_API_KEY not configured')
+    const anthropicKey = Deno.env.get('ANTHROPIC_API_KEY')
+    if (!anthropicKey) throw new Error('ANTHROPIC_API_KEY not configured')
 
     const { url } = await req.json() as { url: string }
     if (!url) throw new Error('Missing url in request body')
@@ -53,7 +53,7 @@ Deno.serve(async (req: Request) => {
     let binary = ''
     for (let i = 0; i < uint8.length; i++) binary += String.fromCharCode(uint8[i])
     const base64 = btoa(binary)
-    const mimeType = pdfRes.headers.get('content-type') ?? 'application/pdf'
+    const mediaType = pdfRes.headers.get('content-type') ?? 'application/pdf'
 
     const prompt = `You are extracting supplier registration data from a Colombian RUT (Registro Único Tributario) or Cámara de Comercio document.
 
@@ -72,30 +72,36 @@ Extract the following fields and return ONLY a valid JSON object with these exac
 
 Return only the JSON object, no explanation or markdown.`
 
-    const geminiRes = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${googleKey}`,
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          contents: [{
-            parts: [
-              { inline_data: { mime_type: mimeType, data: base64 } },
-              { text: prompt },
-            ],
-          }],
-          generationConfig: { temperature: 0, maxOutputTokens: 512 },
-        }),
+    const claudeRes = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': anthropicKey,
+        'anthropic-version': '2023-06-01',
       },
-    )
+      body: JSON.stringify({
+        model: 'claude-haiku-4-5-20251001',
+        max_tokens: 512,
+        messages: [{
+          role: 'user',
+          content: [
+            {
+              type: 'document',
+              source: { type: 'base64', media_type: mediaType, data: base64 },
+            },
+            { type: 'text', text: prompt },
+          ],
+        }],
+      }),
+    })
 
-    if (!geminiRes.ok) {
-      const body = await geminiRes.text()
-      throw new Error(`Gemini API error (${geminiRes.status}): ${body}`)
+    if (!claudeRes.ok) {
+      const body = await claudeRes.text()
+      throw new Error(`Claude API error (${claudeRes.status}): ${body}`)
     }
 
-    const geminiData = await geminiRes.json()
-    const rawText: string = geminiData.candidates?.[0]?.content?.parts?.[0]?.text ?? ''
+    const claudeData = await claudeRes.json()
+    const rawText: string = claudeData.content?.[0]?.text ?? ''
 
     // Strip any markdown code fences if present
     const jsonText = rawText.replace(/^```[a-z]*\n?/i, '').replace(/\n?```$/, '').trim()
