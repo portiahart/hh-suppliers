@@ -585,6 +585,11 @@ interface Retencion {
   notas: string | null
 }
 
+const RET_PLACEHOLDER_ROWS: Retencion[] = [
+  { id: '_ph_1', supplier_id: '', retencion_tipo: 'Retefuente', concepto: null, tarifa_recomendada: null, base_minima: null, tarifa_aplicada: null, aplica: false, notas: null },
+  { id: '_ph_2', supplier_id: '', retencion_tipo: 'ReteICA',    concepto: null, tarifa_recomendada: null, base_minima: null, tarifa_aplicada: null, aplica: false, notas: null },
+  { id: '_ph_3', supplier_id: '', retencion_tipo: 'ReteIVA',    concepto: null, tarifa_recomendada: null, base_minima: null, tarifa_aplicada: null, aplica: false, notas: null },
+]
 
 async function upsertRetenciones(supplierId: string, recommendations: RetencionRecomendada[]): Promise<void> {
   const { data: existing, error: fetchErr } = await supabase
@@ -904,84 +909,92 @@ function RetencionesCard({ supplierId, showToast }: { supplierId: string | null;
     >
       {loading ? (
         <SkeletonFields />
-      ) : displayRows.length === 0 && !editing ? (
-        <p style={{ fontFamily: 'var(--font-body)', fontWeight: 300, fontSize: '0.875rem', color: 'var(--hh-haze)', margin: 0 }}>
-          Sin retenciones registradas.
-        </p>
       ) : (
         <div style={{ overflowX: 'auto' }}>
-          <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 480 }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 720 }}>
             <thead>
               <tr style={{ borderBottom: '1px solid rgba(122,145,165,0.2)' }}>
-                {['Tipo', 'Concepto', 'Tarifa Sug.', 'Tarifa Aplic.', 'Aplica'].map(h => (
+                {['Tipo', 'Concepto', 'Tarifa Rec. (%)', 'Base Mínima (COP)', 'Tarifa Aplic. (%)', 'Aplica', 'Notas'].map(h => (
                   <th key={h} style={retThStyle}>{h}</th>
                 ))}
               </tr>
             </thead>
             <tbody>
-              {displayRows.map((r, idx) => (
-                <tr key={r.id} style={{ background: idx % 2 === 1 ? 'var(--hh-ice)' : 'var(--hh-white)' }}>
-                  <td style={retTdStyle}>
-                    {editing ? (
-                      <select value={r.retencion_tipo} onChange={e => updateRow(r.id, 'retencion_tipo', e.target.value)} style={{ ...inputStyle, width: 'auto' }}>
-                        <option>Retefuente</option>
-                        <option>ReteICA</option>
-                        <option>ReteIVA</option>
-                      </select>
-                    ) : (
-                      <span style={{ fontFamily: 'var(--font-body)', fontSize: '0.8125rem', fontWeight: 500 }}>{r.retencion_tipo}</span>
-                    )}
-                  </td>
-                  <td style={retTdStyle}>
-                    {editing
-                      ? <input type="text" value={r.concepto ?? ''} onChange={e => updateRow(r.id, 'concepto', e.target.value || null)} style={inputStyle} />
-                      : <span style={retValStyle}>{r.concepto ?? <Muted>—</Muted>}</span>}
-                  </td>
-                  <td style={retTdStyle}>
-                    {editing
-                      ? <input type="number" value={r.tarifa_recomendada ?? ''} onChange={e => updateRow(r.id, 'tarifa_recomendada', e.target.value ? Number(e.target.value) : null)} style={{ ...inputStyle, width: 64 }} />
-                      : r.tarifa_recomendada === null && r.aplica ? (
-                        <span style={{ display: 'inline-block', padding: '2px 8px', borderRadius: 99, background: 'rgba(255,193,7,0.15)', color: '#856404', fontSize: '0.75rem', fontWeight: 500 }}>
-                          Revisar
-                        </span>
+              {(displayRows.length > 0 ? displayRows : RET_PLACEHOLDER_ROWS).map((r, idx) => {
+                const isPlaceholder = displayRows.length === 0 && !editing
+                return (
+                  <tr key={r.id} style={{ background: idx % 2 === 1 ? 'var(--hh-ice)' : 'var(--hh-white)' }}>
+                    <td style={retTdStyle}>
+                      {editing && !isPlaceholder ? (
+                        <select value={r.retencion_tipo} onChange={e => updateRow(r.id, 'retencion_tipo', e.target.value)} style={{ ...inputStyle, width: 'auto' }}>
+                          <option>Retefuente</option>
+                          <option>ReteICA</option>
+                          <option>ReteIVA</option>
+                        </select>
                       ) : (
-                        <span style={{ ...retValStyle, color: 'var(--hh-haze)', fontFamily: 'var(--font-numeric)', fontVariantNumeric: 'tabular-nums' }}>
-                          {r.tarifa_recomendada != null ? `${r.tarifa_recomendada}${r.retencion_tipo === 'ReteICA' ? '‰' : '%'}` : <Muted>—</Muted>}
+                        <span style={{ fontFamily: 'var(--font-body)', fontSize: '0.8125rem', fontWeight: 500 }}>{r.retencion_tipo}</span>
+                      )}
+                    </td>
+                    <td style={retTdStyle}>
+                      {editing && !isPlaceholder
+                        ? <input type="text" value={r.concepto ?? ''} onChange={e => updateRow(r.id, 'concepto', e.target.value || null)} style={inputStyle} />
+                        : <span style={retValStyle}>{r.concepto ?? <Muted>—</Muted>}</span>}
+                    </td>
+                    <td style={retTdStyle}>
+                      {editing && !isPlaceholder
+                        ? <input type="number" value={r.tarifa_recomendada ?? ''} onChange={e => updateRow(r.id, 'tarifa_recomendada', e.target.value ? Number(e.target.value) : null)} style={{ ...inputStyle, width: 64 }} />
+                        : r.tarifa_recomendada === null && r.aplica ? (
+                          <span style={{ display: 'inline-block', padding: '2px 8px', borderRadius: 99, background: 'rgba(255,193,7,0.15)', color: '#856404', fontSize: '0.75rem', fontWeight: 500 }}>
+                            Revisar
+                          </span>
+                        ) : (
+                          <span style={{ ...retValStyle, color: 'var(--hh-haze)', fontFamily: 'var(--font-numeric)', fontVariantNumeric: 'tabular-nums' }}>
+                            {r.tarifa_recomendada != null ? `${r.tarifa_recomendada}${r.retencion_tipo === 'ReteICA' ? '‰' : '%'}` : <Muted>—</Muted>}
+                          </span>
+                        )
+                      }
+                    </td>
+                    <td style={retTdStyle}>
+                      {editing && !isPlaceholder
+                        ? <input type="number" value={r.base_minima ?? ''} onChange={e => updateRow(r.id, 'base_minima', e.target.value ? Number(e.target.value) : null)} style={{ ...inputStyle, width: 110 }} />
+                        : <span style={{ ...retValStyle, fontFamily: 'var(--font-numeric)', fontVariantNumeric: 'tabular-nums' }}>{r.base_minima != null ? `$${Math.round(r.base_minima).toLocaleString('es-CO')}` : <Muted>—</Muted>}</span>}
+                    </td>
+                    <td style={retTdStyle}>
+                      {editing && !isPlaceholder
+                        ? <input type="number" value={r.tarifa_aplicada ?? ''} onChange={e => updateRow(r.id, 'tarifa_aplicada', e.target.value ? Number(e.target.value) : null)} style={{ ...inputStyle, width: 64 }} />
+                        : (() => {
+                            const differs = r.tarifa_aplicada != null && r.tarifa_aplicada !== r.tarifa_recomendada
+                            return (
+                              <span style={{ ...retValStyle, color: differs ? 'var(--hh-teal)' : undefined, fontFamily: 'var(--font-numeric)', fontVariantNumeric: 'tabular-nums', display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                                {r.tarifa_aplicada != null ? `${r.tarifa_aplicada}${r.retencion_tipo === 'ReteICA' ? '‰' : '%'}` : <Muted>—</Muted>}
+                                {differs && <Pencil1Icon width={11} height={11} style={{ opacity: 0.7 }} />}
+                              </span>
+                            )
+                          })()
+                      }
+                    </td>
+                    <td style={retTdStyle}>
+                      {editing && !isPlaceholder ? (
+                        <input type="checkbox" checked={r.aplica} onChange={e => updateRow(r.id, 'aplica', e.target.checked)} style={{ cursor: 'pointer', width: 16, height: 16 }} />
+                      ) : (
+                        <span style={{
+                          display: 'inline-block', padding: '2px 8px', borderRadius: 99,
+                          background: r.aplica ? 'rgba(74,155,142,0.12)' : 'rgba(122,145,165,0.12)',
+                          color: r.aplica ? 'var(--hh-teal)' : 'var(--hh-haze)',
+                          fontSize: '0.75rem', fontWeight: 500,
+                        }}>
+                          {r.aplica ? 'Sí' : 'No'}
                         </span>
-                      )
-                    }
-                  </td>
-                  <td style={retTdStyle}>
-                    {editing
-                      ? <input type="number" value={r.tarifa_aplicada ?? ''} onChange={e => updateRow(r.id, 'tarifa_aplicada', e.target.value ? Number(e.target.value) : null)} style={{ ...inputStyle, width: 64 }} />
-                      : (() => {
-                          const differs = r.tarifa_aplicada != null && r.tarifa_aplicada !== r.tarifa_recomendada
-                          return (
-                            <span style={{ ...retValStyle, color: differs ? 'var(--hh-teal)' : undefined, fontFamily: 'var(--font-numeric)', fontVariantNumeric: 'tabular-nums', display: 'inline-flex', alignItems: 'center', gap: 4 }}>
-                              {r.tarifa_aplicada != null ? `${r.tarifa_aplicada}${r.retencion_tipo === 'ReteICA' ? '‰' : '%'}` : <Muted>—</Muted>}
-                              {differs && <Pencil1Icon width={11} height={11} style={{ opacity: 0.7 }} />}
-                            </span>
-                          )
-                        })()
-                    }
-                  </td>
-                  <td style={retTdStyle}>
-                    {editing ? (
-                      <input type="checkbox" checked={r.aplica} onChange={e => updateRow(r.id, 'aplica', e.target.checked)}
-                        style={{ cursor: 'pointer', width: 16, height: 16 }} />
-                    ) : (
-                      <span style={{
-                        display: 'inline-block', padding: '2px 8px', borderRadius: 99,
-                        background: r.aplica ? 'rgba(74,155,142,0.12)' : 'rgba(122,145,165,0.12)',
-                        color: r.aplica ? 'var(--hh-teal)' : 'var(--hh-haze)',
-                        fontSize: '0.75rem', fontWeight: 500,
-                      }}>
-                        {r.aplica ? 'Sí' : 'No'}
-                      </span>
-                    )}
-                  </td>
-                </tr>
-              ))}
+                      )}
+                    </td>
+                    <td style={retTdStyle}>
+                      {editing && !isPlaceholder
+                        ? <input type="text" value={r.notas ?? ''} onChange={e => updateRow(r.id, 'notas', e.target.value || null)} style={inputStyle} />
+                        : <span style={{ ...retValStyle, maxWidth: 260, display: 'inline-block' }}>{r.notas ?? <Muted>—</Muted>}</span>}
+                    </td>
+                  </tr>
+                )
+              })}
             </tbody>
           </table>
         </div>

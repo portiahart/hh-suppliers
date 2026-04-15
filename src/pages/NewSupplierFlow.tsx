@@ -24,7 +24,7 @@ export function NewSupplierFlow() {
     if (nit.trim()) {
       const { data: existing } = await suppliersQuery('id').eq('nit', nit.trim()).maybeSingle()
       if (existing) {
-        setDuplicateId((existing as { id: string }).id)
+        setDuplicateId((existing as unknown as { id: string }).id)
         setError('Ya existe un proveedor con este NIT.')
         return
       }

@@ -33,7 +33,7 @@ export interface RUTData {
 }
 
 export interface RetencionRecomendada {
-  retencion_tipo: 'RetenFuente' | 'ReteICA' | 'ReteIVA'
+  retencion_tipo: 'Retefuente' | 'ReteICA' | 'ReteIVA'
   concepto: string
   tarifa_recomendada: number | null
   base_minima: number | null
