@@ -1049,10 +1049,11 @@ function DocumentosTab({ supplierId, onExtract }: { supplierId: string | null; o
     }
     setUploading(true)
     const slugify = (s: string) => s.normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-zA-Z0-9._-]/g, '_')
-    const storagePath = `${supplierId}/${slugify(uploadType)}/${slugify(uploadFile.name)}`
+    const ts = Date.now()
+    const storagePath = `${supplierId}/${slugify(uploadType)}/${ts}_${slugify(uploadFile.name)}`
     const { error: uploadError } = await supabase.storage
       .from('supplier-documents')
-      .upload(storagePath, uploadFile, { upsert: true })
+      .upload(storagePath, uploadFile)
     if (uploadError) {
       setUploading(false)
       showToast(`Error al subir: ${uploadError.message}`)
