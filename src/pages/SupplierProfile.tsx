@@ -1005,7 +1005,6 @@ interface DocRow {
   file_size_bytes: number | null
   mime_type: string | null
   uploaded_by: string | null
-  created_at: string
 }
 
 function DocumentosTab({ supplierId, onExtract }: { supplierId: string | null; onExtract?: (f: ExtractedFields) => void }) {
@@ -1030,7 +1029,7 @@ function DocumentosTab({ supplierId, onExtract }: { supplierId: string | null; o
       .from('suppliers_documents')
       .select('*')
       .eq('supplier_id', supplierId)
-      .order('created_at', { ascending: false })
+      .order('id', { ascending: false })
     if (error) showToast(`Error al cargar documentos: ${error.message}`)
     setDocs((data as DocRow[]) ?? [])
     setLoading(false)
@@ -1205,8 +1204,7 @@ function DocumentosTab({ supplierId, onExtract }: { supplierId: string | null; o
                         fontFamily: 'var(--font-body)', fontWeight: 300,
                         fontSize: '0.75rem', color: 'var(--hh-haze)', margin: 0,
                       }}>
-                        {formatDate(doc.created_at)}
-                        {doc.file_size_bytes ? ` · ${formatBytes(doc.file_size_bytes)}` : ''}
+                        {doc.file_size_bytes ? formatBytes(doc.file_size_bytes) : ''}
                         {' · '}
                         {doc.uploaded_by ?? 'Proveedor'}
                       </p>
