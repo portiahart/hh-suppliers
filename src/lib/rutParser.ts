@@ -1,4 +1,4 @@
-import { RUTData } from './rutTypes'
+import type { RUTData } from './rutTypes'
 
 export async function parseRUT(fileUrl: string): Promise<RUTData> {
   const fileResponse = await fetch(fileUrl)

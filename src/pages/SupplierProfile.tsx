@@ -4,6 +4,8 @@ import { ArrowLeftIcon, Pencil1Icon, DownloadIcon } from '@radix-ui/react-icons'
 import { useAuth } from '../context/AuthContext'
 import { supabase } from '../lib/supabase'
 import type { Supplier } from '../types/supplier'
+import { computeRetenciones } from '../lib/retencionesEngine'
+import type { RetencionRecomendada } from '../lib/rutTypes'
 
 const TABS = ['General', 'Bancario', 'Evaluación', 'B Corp', 'Gasto'] as const
 type Tab = typeof TABS[number]
@@ -603,6 +605,34 @@ interface Retencion {
   notas: string | null
 }
 
+async function upsertRetenciones(supplierId: string, recommendations: RetencionRecomendada[]): Promise<void> {
+  const { data: existing } = await supabase
+    .from('suppliers_retenciones')
+    .select('id, tipo, tarifa_aplicada')
+    .eq('supplier_id', supplierId)
+  const existingMap = new Map<string, { id: string; tarifa_aplicada: number | null }>()
+  for (const row of (existing ?? [])) {
+    existingMap.set(row.tipo, { id: row.id, tarifa_aplicada: row.tarifa_aplicada })
+  }
+  for (const rec of recommendations) {
+    const tipo = rec.retencion_tipo
+    const payload = {
+      concepto: rec.concepto,
+      tarifa_recomendada: rec.tarifa_recomendada,
+      base_minima: rec.base_minima,
+      aplica: rec.aplica,
+      notas: rec.notas,
+      updated_at: new Date().toISOString(),
+    }
+    const existingRow = existingMap.get(tipo)
+    if (existingRow) {
+      await supabase.from('suppliers_retenciones').update(payload).eq('id', existingRow.id)
+    } else {
+      await supabase.from('suppliers_retenciones').insert({ supplier_id: supplierId, tipo, tarifa_aplicada: null, ...payload })
+    }
+  }
+}
+
 const ZONE_COLORS: Record<string, { bg: string; text: string }> = {
   Cartagena: { bg: 'var(--hh-teal)',  text: '#fff' },
   Bolivar:   { bg: 'var(--hh-lemon)', text: 'var(--hh-dark)' },
@@ -619,6 +649,7 @@ function RetencionesCard({ supplierId, showToast }: { supplierId: string | null;
   const [saving, setSaving] = useState(false)
   const [draftRows, setDraftRows] = useState<Retencion[]>([])
   const [counter, setCounter] = useState(0)
+  const [recalculating, setRecalculating] = useState(false)
 
   useEffect(() => {
     if (!supplierId) return
@@ -695,6 +726,39 @@ function RetencionesCard({ supplierId, showToast }: { supplierId: string | null;
     }
   }
 
+  const handleRecalculate = async () => {
+    if (!supplierId) return
+    setRecalculating(true)
+    try {
+      const { data: docs } = await supabase
+        .from('suppliers_documents')
+        .select('storage_path')
+        .eq('supplier_id', supplierId)
+        .eq('document_type', 'RUT')
+        .order('id', { ascending: false })
+        .limit(1)
+      if (!docs?.length) throw new Error('No se encontró un RUT subido para este proveedor.')
+      const { data: urlData, error: urlErr } = await supabase.storage
+        .from('supplier-documents')
+        .createSignedUrl(docs[0].storage_path, 120)
+      if (urlErr || !urlData?.signedUrl) throw new Error('No se pudo generar enlace para el RUT.')
+      const { data: res, error: fnErr } = await supabase.functions.invoke('extract-rut', {
+        body: { url: urlData.signedUrl },
+      })
+      if (fnErr || !res?.success) throw new Error(fnErr?.message ?? res?.error ?? 'Error al analizar RUT.')
+      const recommendations = computeRetenciones(res.rut)
+      await upsertRetenciones(supplierId, recommendations)
+      const { data } = await supabase
+        .from('suppliers_retenciones').select('*')
+        .eq('supplier_id', supplierId).order('created_at')
+      setRows((data as Retencion[]) ?? [])
+      showToast('Retenciones recalculadas.')
+    } catch (e) {
+      showToast(e instanceof Error ? e.message : 'Error al recalcular retenciones.')
+    }
+    setRecalculating(false)
+  }
+
   const displayRows = editing ? draftRows : rows
 
   return (
@@ -702,10 +766,15 @@ function RetencionesCard({ supplierId, showToast }: { supplierId: string | null;
       title="Retenciones"
       action={
         !editing ? (
-          <button onClick={startEdit} style={ghostBtnStyle}>
-            <Pencil1Icon width={14} height={14} />
-            Editar
-          </button>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button onClick={handleRecalculate} disabled={recalculating} style={ghostBtnStyle}>
+              {recalculating ? 'Calculando…' : 'Recalcular desde RUT'}
+            </button>
+            <button onClick={startEdit} style={ghostBtnStyle}>
+              <Pencil1Icon width={14} height={14} />
+              Editar
+            </button>
+          </div>
         ) : (
           <div style={{ display: 'flex', gap: 8 }}>
             <button onClick={cancelEdit} style={ghostBtnStyle}>Cancelar</button>
@@ -754,7 +823,16 @@ function RetencionesCard({ supplierId, showToast }: { supplierId: string | null;
                   <td style={retTdStyle}>
                     {editing
                       ? <input type="number" value={r.tarifa_recomendada ?? ''} onChange={e => updateRow(r.id, 'tarifa_recomendada', e.target.value ? Number(e.target.value) : null)} style={{ ...inputStyle, width: 72 }} />
-                      : <span style={{ ...retValStyle, fontFamily: 'var(--font-numeric)', fontVariantNumeric: 'tabular-nums' }}>{r.tarifa_recomendada != null ? `${r.tarifa_recomendada}%` : <Muted>—</Muted>}</span>}
+                      : r.tarifa_recomendada === null && r.aplica ? (
+                        <span style={{ display: 'inline-block', padding: '2px 8px', borderRadius: 99, background: 'rgba(255,193,7,0.15)', color: '#856404', fontSize: '0.75rem', fontWeight: 500 }}>
+                          Revisar
+                        </span>
+                      ) : (
+                        <span title={r.notas ?? undefined} style={{ ...retValStyle, color: 'var(--hh-haze)', fontFamily: 'var(--font-numeric)', fontVariantNumeric: 'tabular-nums', cursor: r.notas ? 'help' : 'default' }}>
+                          {r.tarifa_recomendada != null ? `${r.tarifa_recomendada}${r.tipo === 'ReteICA' ? '‰' : '%'}` : <Muted>—</Muted>}
+                        </span>
+                      )
+                    }
                   </td>
                   <td style={retTdStyle}>
                     {editing
@@ -764,7 +842,16 @@ function RetencionesCard({ supplierId, showToast }: { supplierId: string | null;
                   <td style={retTdStyle}>
                     {editing
                       ? <input type="number" value={r.tarifa_aplicada ?? ''} onChange={e => updateRow(r.id, 'tarifa_aplicada', e.target.value ? Number(e.target.value) : null)} style={{ ...inputStyle, width: 72 }} />
-                      : <span style={{ ...retValStyle, fontFamily: 'var(--font-numeric)', fontVariantNumeric: 'tabular-nums' }}>{r.tarifa_aplicada != null ? `${r.tarifa_aplicada}%` : <Muted>—</Muted>}</span>}
+                      : (() => {
+                          const differs = r.tarifa_aplicada != null && r.tarifa_aplicada !== r.tarifa_recomendada
+                          return (
+                            <span style={{ ...retValStyle, color: differs ? 'var(--hh-teal)' : undefined, fontFamily: 'var(--font-numeric)', fontVariantNumeric: 'tabular-nums', display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                              {r.tarifa_aplicada != null ? `${r.tarifa_aplicada}${r.tipo === 'ReteICA' ? '‰' : '%'}` : <Muted>—</Muted>}
+                              {differs && <Pencil1Icon width={11} height={11} style={{ opacity: 0.7 }} />}
+                            </span>
+                          )
+                        })()
+                    }
                   </td>
                   <td style={retTdStyle}>
                     {editing ? (
@@ -1090,6 +1177,8 @@ function DocumentosTab({ supplierId, onExtract }: { supplierId: string | null; o
   const [uploading, setUploading] = useState(false)
   const [deletingId, setDeletingId] = useState<string | null>(null)
   const [extractingId, setExtractingId] = useState<string | null>(null)
+  const [rutBannerPath, setRutBannerPath] = useState<string | null>(null)
+  const [analyzingRUT, setAnalyzingRUT] = useState(false)
 
   const showToast = (msg: string) => {
     setToast(msg)
@@ -1147,6 +1236,7 @@ function DocumentosTab({ supplierId, onExtract }: { supplierId: string | null; o
     const input = document.getElementById('doc-file-input') as HTMLInputElement | null
     if (input) input.value = ''
     showToast('Documento subido correctamente.')
+    if (uploadType === 'RUT') setRutBannerPath(storagePath)
     void fetchDocs()
   }
 
@@ -1168,6 +1258,28 @@ function DocumentosTab({ supplierId, onExtract }: { supplierId: string | null; o
       showToast(e instanceof Error ? e.message : 'Error al extraer datos.')
     }
     setExtractingId(null)
+  }
+
+  const handleAnalyzeRUT = async () => {
+    if (!supplierId || !rutBannerPath) return
+    setAnalyzingRUT(true)
+    try {
+      const { data: urlData, error: urlErr } = await supabase.storage
+        .from('supplier-documents')
+        .createSignedUrl(rutBannerPath, 120)
+      if (urlErr || !urlData?.signedUrl) throw new Error('No se pudo generar enlace para el RUT.')
+      const { data: res, error: fnErr } = await supabase.functions.invoke('extract-rut', {
+        body: { url: urlData.signedUrl },
+      })
+      if (fnErr || !res?.success) throw new Error(fnErr?.message ?? res?.error ?? 'Error al analizar RUT.')
+      const recommendations = computeRetenciones(res.rut)
+      await upsertRetenciones(supplierId, recommendations)
+      setRutBannerPath(null)
+      showToast('Retenciones calculadas — revisa la sección de Retenciones.')
+    } catch (e) {
+      showToast(e instanceof Error ? e.message : 'Error al analizar el RUT.')
+    }
+    setAnalyzingRUT(false)
   }
 
   const handleDownload = async (doc: DocRow) => {
@@ -1224,6 +1336,37 @@ function DocumentosTab({ supplierId, onExtract }: { supplierId: string | null; o
           boxShadow: '0 4px 16px rgba(0,0,0,0.15)',
         }}>
           {toast}
+        </div>
+      )}
+
+      {rutBannerPath && (
+        <div style={{
+          background: 'rgba(74,155,142,0.08)',
+          border: '1px solid rgba(74,155,142,0.3)',
+          borderRadius: 8,
+          padding: '14px 20px',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          gap: 12,
+          flexWrap: 'wrap',
+          marginBottom: 8,
+        }}>
+          <p style={{ margin: 0, fontFamily: 'var(--font-body)', fontSize: '0.875rem', color: 'var(--hh-dark)' }}>
+            RUT subido — ¿Calcular recomendaciones de retenciones automáticamente?
+          </p>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button onClick={() => setRutBannerPath(null)} style={ghostBtnStyle}>
+              Omitir
+            </button>
+            <button
+              onClick={handleAnalyzeRUT}
+              disabled={analyzingRUT}
+              style={{ ...ghostBtnStyle, color: 'var(--hh-teal)', borderColor: 'var(--hh-teal)' }}
+            >
+              {analyzingRUT ? 'Analizando…' : 'Analizar RUT'}
+            </button>
+          </div>
         </div>
       )}
 

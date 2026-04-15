@@ -1,4 +1,4 @@
-import { RUTData, RetencionRecomendada } from './rutTypes'
+import type { RUTData, RetencionRecomendada } from './rutTypes'
 
 type ConceptoFuente = 'COMPRAS' | 'SERVICIOS' | 'HONORARIOS' | 'TRANSPORTE_CARGA' | 'ARRENDAMIENTO' | 'CONTRATOS_CONSTRUCCION'
 
