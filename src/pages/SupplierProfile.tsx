@@ -122,17 +122,31 @@ export function SupplierProfile() {
   )
 }
 
+/* ─── Shared extracted-fields type ───────────────────────── */
+
+interface ExtractedFields {
+  razon_social:      string | null
+  nit:               string | null
+  tipo_persona:      'JURIDICA' | 'NATURAL' | null
+  codigo_tributario: string | null
+  ciiu:              string | null
+  direccion:         string | null
+  ciudad:            string | null
+  pais:              string | null
+}
+
 /* ─── General Tab (Resumen + Legal + Documentos) ─────────── */
 
 function GeneralTab({ supplier, loading, onUpdate, supplierId }: ResumenTabProps & { supplierId: string | null }) {
+  const [prefill, setPrefill] = useState<ExtractedFields | null>(null)
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 0 }}>
-      <ResumenTab supplier={supplier} loading={loading} onUpdate={onUpdate} />
+      <ResumenTab supplier={supplier} loading={loading} onUpdate={onUpdate} prefill={prefill} onPrefillConsumed={() => setPrefill(null)} />
       <div style={{ marginTop: 24 }}>
-        <LegalTab supplier={supplier} supplierId={supplierId} />
+        <LegalTab supplier={supplier} supplierId={supplierId} prefill={prefill} onPrefillConsumed={() => setPrefill(null)} />
       </div>
       <div style={{ marginTop: 24 }}>
-        <DocumentosTab supplierId={supplierId} />
+        <DocumentosTab supplierId={supplierId} onExtract={setPrefill} />
       </div>
     </div>
   )
@@ -144,13 +158,32 @@ interface ResumenTabProps {
   supplier: Supplier | null
   loading: boolean
   onUpdate: (s: Supplier) => void
+  prefill?: ExtractedFields | null
+  onPrefillConsumed?: () => void
 }
 
-function ResumenTab({ supplier, loading, onUpdate }: ResumenTabProps) {
+function ResumenTab({ supplier, loading, onUpdate, prefill, onPrefillConsumed }: ResumenTabProps) {
   const [editing, setEditing] = useState(false)
   const [saving, setSaving] = useState(false)
   const [toast, setToast] = useState<string | null>(null)
   const [draft, setDraft] = useState<Partial<Supplier>>({})
+
+  useEffect(() => {
+    if (!prefill || !supplier) return
+    setDraft(d => ({
+      razon_social:     prefill.razon_social      ?? d.razon_social     ?? supplier.razon_social     ?? '',
+      nombre_operativo: d.nombre_operativo        ?? supplier.nombre_operativo ?? '',
+      nit:              prefill.nit               ?? d.nit              ?? supplier.nit              ?? '',
+      documento_tipo:   d.documento_tipo          ?? supplier.documento_tipo   ?? '',
+      tipo_persona:     prefill.tipo_persona      ?? d.tipo_persona     ?? supplier.tipo_persona     ?? '',
+      email:            d.email                   ?? supplier.email             ?? '',
+      telefono:         d.telefono                ?? supplier.telefono          ?? '',
+      status:           d.status                  ?? supplier.status,
+    }))
+    setEditing(true)
+    onPrefillConsumed?.()
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [prefill])
 
   const showToast = (msg: string) => {
     setToast(msg)
@@ -167,7 +200,6 @@ function ResumenTab({ supplier, loading, onUpdate }: ResumenTabProps) {
       tipo_persona: supplier.tipo_persona ?? '',
       email: supplier.email ?? '',
       telefono: supplier.telefono ?? '',
-      categoria: supplier.categoria ?? '',
       status: supplier.status,
     })
     setEditing(true)
@@ -293,12 +325,6 @@ function ResumenTab({ supplier, loading, onUpdate }: ResumenTabProps) {
                 editing={editing}
                 onChange={v => setDraft(d => ({ ...d, telefono: v }))}
               />
-              <Field
-                label="Categoría"
-                value={editing ? (draft.categoria ?? '') : (supplier?.categoria ?? null)}
-                editing={editing}
-                onChange={v => setDraft(d => ({ ...d, categoria: v }))}
-              />
               <div>
                 <p style={labelStyle}>Estado</p>
                 {editing ? (
@@ -411,7 +437,12 @@ const ZONE_COLORS: Record<string, { bg: string; text: string }> = {
   ROW:       { bg: 'var(--hh-dark)',  text: 'var(--hh-ice)' },
 }
 
-function LegalTab({ supplier, supplierId }: { supplier: Supplier | null; supplierId: string | null }) {
+function LegalTab({ supplier, supplierId, prefill, onPrefillConsumed }: {
+  supplier: Supplier | null
+  supplierId: string | null
+  prefill?: ExtractedFields | null
+  onPrefillConsumed?: () => void
+}) {
   const [legalData, setLegalData] = useState<LegalData | null>(null)
   const [loadingLegal, setLoadingLegal] = useState(true)
   const [editing, setEditing] = useState(false)
@@ -426,6 +457,25 @@ function LegalTab({ supplier, supplierId }: { supplier: Supplier | null; supplie
     setToast(msg)
     setTimeout(() => setToast(null), 3500)
   }
+
+  useEffect(() => {
+    if (!prefill) return
+    setDraft(d => {
+      const ciudad = prefill.ciudad ?? d.ciudad ?? legalData?.ciudad ?? null
+      return {
+        codigo_tributario: prefill.codigo_tributario ?? d.codigo_tributario ?? legalData?.codigo_tributario ?? null,
+        ciiu:              prefill.ciiu              ?? d.ciiu              ?? legalData?.ciiu              ?? null,
+        direccion:         prefill.direccion         ?? d.direccion         ?? legalData?.direccion         ?? null,
+        ciudad,
+        pais:              prefill.pais              ?? d.pais              ?? legalData?.pais              ?? 'Colombia',
+        proximity_zone:    ciudad ? computeZone(ciudad) : d.proximity_zone ?? legalData?.proximity_zone ?? null,
+        tipo_persona:      prefill.tipo_persona      ?? d.tipo_persona      ?? supplier?.tipo_persona      ?? null,
+      }
+    })
+    setEditing(true)
+    onPrefillConsumed?.()
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [prefill])
 
   useEffect(() => {
     if (!supplierId) return
@@ -1211,7 +1261,7 @@ interface DocRow {
   created_at: string
 }
 
-function DocumentosTab({ supplierId }: { supplierId: string | null }) {
+function DocumentosTab({ supplierId, onExtract }: { supplierId: string | null; onExtract?: (f: ExtractedFields) => void }) {
   const { session } = useAuth()
   const [docs, setDocs] = useState<DocRow[]>([])
   const [loading, setLoading] = useState(true)
@@ -1220,6 +1270,7 @@ function DocumentosTab({ supplierId }: { supplierId: string | null }) {
   const [uploadFile, setUploadFile] = useState<File | null>(null)
   const [uploading, setUploading] = useState(false)
   const [deletingId, setDeletingId] = useState<string | null>(null)
+  const [extractingId, setExtractingId] = useState<string | null>(null)
 
   const showToast = (msg: string) => {
     setToast(msg)
@@ -1275,6 +1326,26 @@ function DocumentosTab({ supplierId }: { supplierId: string | null }) {
     if (input) input.value = ''
     showToast('Documento subido correctamente.')
     void fetchDocs()
+  }
+
+  const handleExtract = async (doc: DocRow) => {
+    if (!onExtract) return
+    setExtractingId(doc.id)
+    try {
+      const { data: urlData, error: urlErr } = await supabase.storage
+        .from('supplier-documents')
+        .createSignedUrl(doc.storage_path, 120)
+      if (urlErr || !urlData?.signedUrl) throw new Error('No se pudo generar enlace para el archivo.')
+      const { data: res, error: fnErr } = await supabase.functions.invoke('extract-rut', {
+        body: { url: urlData.signedUrl },
+      })
+      if (fnErr || !res?.success) throw new Error(fnErr?.message ?? res?.error ?? 'Error al extraer datos.')
+      onExtract(res.fields as ExtractedFields)
+      showToast('Datos extraídos. Revisa y guarda en las secciones de arriba.')
+    } catch (e) {
+      showToast(e instanceof Error ? e.message : 'Error al extraer datos.')
+    }
+    setExtractingId(null)
   }
 
   const handleDownload = async (doc: DocRow) => {
@@ -1391,6 +1462,15 @@ function DocumentosTab({ supplierId }: { supplierId: string | null }) {
                       </p>
                     </div>
                     <div style={{ display: 'flex', gap: 8, flexShrink: 0 }}>
+                      {onExtract && (doc.document_type === 'RUT' || doc.document_type === 'Cámara de Comercio') && doc.mime_type === 'application/pdf' && (
+                        <button
+                          onClick={() => handleExtract(doc)}
+                          disabled={extractingId === doc.id}
+                          style={{ ...ghostBtnStyle, color: 'var(--hh-teal)', borderColor: 'var(--hh-teal)' }}
+                        >
+                          {extractingId === doc.id ? 'Extrayendo…' : 'Extraer datos'}
+                        </button>
+                      )}
                       <button onClick={() => handleDownload(doc)} style={ghostBtnStyle}>
                         Descargar
                       </button>

@@ -78,70 +78,98 @@ Deno.serve(async () => {
     const credentials: ServiceAccountCredentials = JSON.parse(googleCredentialsJson)
     const accessToken = await getGoogleAccessToken(credentials)
 
-    const [nitRows, mainRows] = await Promise.all([
-      fetchNamedRange('NIT', accessToken),
-      fetchNamedRange('MAIN', accessToken),
-    ])
+    // Only need MAIN — NIT is at column index 1, banking data at O-S (14-18)
+    const mainRows = await fetchNamedRange('MAIN', accessToken)
 
     const supabase = createClient(
       Deno.env.get('SUPABASE_URL')!,
       Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!,
     )
 
-    // Fetch all suppliers with a NIT
-    const { data: suppliers, error: suppErr } = await supabase
-      .from('accounts_suppliers')
-      .select('id, nit')
-      .not('nit', 'is', null)
-    if (suppErr) throw new Error(`Failed to fetch suppliers: ${suppErr.message}`)
-
-    // Build NIT→row-index map from the sheet (skip header row 0)
-    const nitToRowIdx = new Map<string, number>()
-    for (let i = 1; i < nitRows.length; i++) {
-      const n = normalizeNit((nitRows[i] as unknown[])[0])
-      if (n) nitToRowIdx.set(n, i)
+    // Fetch all suppliers that have a NIT, paginated
+    type DbSupplier = { id: string; nit: string }
+    const allSuppliers: DbSupplier[] = []
+    const PAGE = 1000
+    for (let from = 0; ; from += PAGE) {
+      const { data, error } = await supabase
+        .from('accounts_suppliers')
+        .select('id, nit')
+        .not('nit', 'is', null)
+        .range(from, from + PAGE - 1)
+      if (error) throw new Error(`Failed to fetch suppliers: ${error.message}`)
+      if (!data || data.length === 0) break
+      allSuppliers.push(...(data as DbSupplier[]))
+      if (data.length < PAGE) break
     }
 
+    // Build NIT→banking-data map directly from MAIN col 1 (skip header row 0)
     const cell = (row: unknown[], i: number): string | null => {
       const v = row[i]
-      return typeof v === 'string' && v.trim() ? v.trim() : null
+      return typeof v === 'string' && v.trim() ? v.trim() : (typeof v === 'number' ? String(v) : null)
     }
 
-    const upserts: Record<string, unknown>[] = []
+    const nitToData = new Map<string, Record<string, string | null>>()
+    for (let i = 1; i < mainRows.length; i++) {
+      const row = mainRows[i] as unknown[]
+      const nit = normalizeNit(row[1])
+      if (!nit) continue
+      // Only record first occurrence per NIT
+      if (!nitToData.has(nit)) {
+        nitToData.set(nit, {
+          nombre_beneficiario:        cell(row, 14),
+          numero_cuenta:              cell(row, 15),
+          tipo_cuenta:                normTipoCuenta(cell(row, 16)),
+          banco:                      cell(row, 17),
+          tipo_documento_bancolombia: cell(row, 18),
+        })
+      }
+    }
+
+    // Build inserts for matched suppliers
+    const inserts: Record<string, unknown>[] = []
     let matched = 0, unmatched = 0
 
-    for (const supplier of suppliers ?? []) {
+    for (const supplier of allSuppliers) {
       const n = normalizeNit(supplier.nit)
-      const rowIdx = nitToRowIdx.get(n)
-      if (rowIdx === undefined) { unmatched++; continue }
-      const row = mainRows[rowIdx] as unknown[] | undefined
-      if (!row) { unmatched++; continue }
+      const bankData = nitToData.get(n)
+      if (!bankData) { unmatched++; continue }
       matched++
-      upserts.push({
-        supplier_id:                supplier.id,
-        nombre_beneficiario:        cell(row, 14), // col O
-        numero_cuenta:              cell(row, 15), // col P
-        tipo_cuenta:                normTipoCuenta(cell(row, 16)), // col Q
-        banco:                      cell(row, 17), // col R
-        tipo_documento_bancolombia: cell(row, 18), // col S
-        updated_at:                 new Date().toISOString(),
+      inserts.push({
+        supplier_id: supplier.id,
+        ...bankData,
+        updated_at: new Date().toISOString(),
       })
     }
 
-    // Upsert in batches
+    // Delete all existing rows then re-insert (avoids unique-constraint dependency)
+    const supplierIds = inserts.map(r => r.supplier_id as string)
+    if (supplierIds.length > 0) {
+      // Delete in chunks to stay within URL length limits
+      const DEL_CHUNK = 500
+      for (let i = 0; i < supplierIds.length; i += DEL_CHUNK) {
+        const chunk = supplierIds.slice(i, i + DEL_CHUNK)
+        const { error } = await supabase
+          .from('suppliers_banking')
+          .delete()
+          .in('supplier_id', chunk)
+        if (error) throw new Error(`Delete error: ${error.message}`)
+      }
+    }
+
+    // Insert in batches
     const BATCH = 200
-    let upserted = 0
-    for (let i = 0; i < upserts.length; i += BATCH) {
-      const batch = upserts.slice(i, i + BATCH)
+    let inserted = 0
+    for (let i = 0; i < inserts.length; i += BATCH) {
+      const batch = inserts.slice(i, i + BATCH)
       const { error } = await supabase
         .from('suppliers_banking')
-        .upsert(batch, { onConflict: 'supplier_id' })
-      if (error) throw new Error(`Upsert error: ${error.message}`)
-      upserted += batch.length
+        .insert(batch)
+      if (error) throw new Error(`Insert error: ${error.message}`)
+      inserted += batch.length
     }
 
     return new Response(
-      JSON.stringify({ success: true, matched, unmatched, upserted }),
+      JSON.stringify({ success: true, matched, unmatched, inserted }),
       { headers: { 'Content-Type': 'application/json' } },
     )
   } catch (e) {
