@@ -57,21 +57,22 @@ Deno.serve(async (req: Request) => {
     const base64 = btoa(binary)
     const mediaType = pdfRes.headers.get('content-type') ?? 'application/pdf'
 
-    const prompt = `You are extracting supplier registration data from a Colombian RUT (Registro Único Tributario) or Cámara de Comercio document.
-
-Extract the following fields and return ONLY a valid JSON object with these exact keys (use null for any field not found):
+    const prompt = `Extract data from this Colombian RUT document. Return ONLY a valid JSON object with exactly these keys (null for any not found):
 
 {
-  "tipo_persona": "JURIDICA or NATURAL only",
-  "codigo_tributario": "Tax regime / responsabilidades tributarias (e.g. 05, 11-04, etc.)",
-  "ciiu": "CIIU economic activity code (numeric only)",
-  "direccion": "Full street address",
-  "ciudad": "City name only",
-  "pais": "Country name (usually Colombia)",
-  "email": "Email address if present",
-  "telefono": "Phone number — always prefix with +57 if Colombian, digits only after that (e.g. +573001234567)",
-  "rep_legal_nombre": "Full name of the principal legal representative only (REPRS LEGAL PRIN, code 18) — ignore any suplente (REPRS LEGAL SUPL, code 19). The RUT stores names in Colombian order: field 104=primer apellido, 105=segundo apellido, 106=primer nombre, 107=otros nombres. Reorder to Western display order: [primer nombre] [otros nombres] [primer apellido] [segundo apellido], omitting blank fields. Example: apellido=HART, segundo apellido=(empty), nombre=PORTIA, otros=ISABELLE → 'Portia Isabelle Hart'",
-  "rep_legal_documento": "ID document number of the principal legal representative (REPRS LEGAL PRIN only, field 101)"
+  "tipo_persona": "JURIDICA or NATURAL",
+  "codigo_tributario": "codes from Responsabilidades section, e.g. 05-07-09",
+  "ciiu": "primary CIIU code, digits only",
+  "direccion": "field 41, Dirección principal",
+  "ciudad": "field 40, Ciudad/Municipio",
+  "pais": "field 38, País",
+  "email": "field 42, Correo electrónico",
+  "telefono": "field 44, prefix with +57 if Colombian",
+  "rep_primer_apellido": "field 104 of REPRS LEGAL PRIN row only (NOT suplente)",
+  "rep_segundo_apellido": "field 105 of REPRS LEGAL PRIN row only (null if blank)",
+  "rep_primer_nombre": "field 106 of REPRS LEGAL PRIN row only",
+  "rep_otros_nombres": "field 107 of REPRS LEGAL PRIN row only (null if blank)",
+  "rep_legal_documento": "field 101 of REPRS LEGAL PRIN row only, digits only"
 }
 
 Return only the JSON object, no explanation or markdown.`
@@ -111,6 +112,15 @@ Return only the JSON object, no explanation or markdown.`
     const jsonText = rawText.replace(/^```[a-z]*\n?/i, '').replace(/\n?```$/, '').trim()
     const parsed = JSON.parse(jsonText) as Record<string, string | null>
 
+    // Build display name: [primer nombre] [otros nombres] [primer apellido] [segundo apellido]
+    const nameParts = [
+      parsed.rep_primer_nombre,
+      parsed.rep_otros_nombres,
+      parsed.rep_primer_apellido,
+      parsed.rep_segundo_apellido,
+    ].filter((p): p is string => typeof p === 'string' && p.trim().length > 0)
+    const rep_legal_nombre = nameParts.length > 0 ? nameParts.join(' ') : null
+
     const fields: ExtractedFields = {
       tipo_persona:       (parsed.tipo_persona === 'JURIDICA' || parsed.tipo_persona === 'NATURAL')
                             ? parsed.tipo_persona : null,
@@ -121,8 +131,10 @@ Return only the JSON object, no explanation or markdown.`
       pais:               parsed.pais ?? null,
       email:              parsed.email ?? null,
       telefono:           parsed.telefono ?? null,
-      rep_legal_nombre:   parsed.rep_legal_nombre ?? null,
-      rep_legal_documento: parsed.rep_legal_documento ?? null,
+      rep_legal_nombre,
+      rep_legal_documento: parsed.rep_legal_documento
+        ? String(parsed.rep_legal_documento).replace(/\D/g, '') || null
+        : null,
     }
 
     return new Response(JSON.stringify({ success: true, fields }), { headers })
