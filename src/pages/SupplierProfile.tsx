@@ -5,7 +5,7 @@ import { useAuth } from '../context/AuthContext'
 import { supabase } from '../lib/supabase'
 import type { Supplier } from '../types/supplier'
 
-const TABS = ['Resumen', 'Legal', 'Bancario', 'Documentos', 'Evaluación', 'B Corp', 'Gasto'] as const
+const TABS = ['General', 'Bancario', 'Evaluación', 'B Corp', 'Gasto'] as const
 type Tab = typeof TABS[number]
 
 export function SupplierProfile() {
@@ -13,7 +13,7 @@ export function SupplierProfile() {
   const navigate = useNavigate()
   const [supplier, setSupplier] = useState<Supplier | null>(null)
   const [loading, setLoading] = useState(true)
-  const [activeTab, setActiveTab] = useState<Tab>('Resumen')
+  const [activeTab, setActiveTab] = useState<Tab>('General')
 
   useEffect(() => {
     if (!id) return
@@ -107,14 +107,10 @@ export function SupplierProfile() {
       </div>
 
       {/* Tab content */}
-      {activeTab === 'Resumen' ? (
-        <ResumenTab supplier={supplier} loading={loading} onUpdate={setSupplier} />
-      ) : activeTab === 'Legal' ? (
-        <LegalTab supplier={supplier} supplierId={id ?? null} />
+      {activeTab === 'General' ? (
+        <GeneralTab supplier={supplier} loading={loading} onUpdate={setSupplier} supplierId={id ?? null} />
       ) : activeTab === 'Bancario' ? (
         <BancarioTab supplierId={id ?? null} nit={supplier?.nit ?? null} />
-      ) : activeTab === 'Documentos' ? (
-        <DocumentosTab supplierId={id ?? null} />
       ) : activeTab === 'Evaluación' ? (
         <EvaluacionTab supplierId={id ?? null} />
       ) : activeTab === 'Gasto' ? (
@@ -122,6 +118,22 @@ export function SupplierProfile() {
       ) : (
         <ComingSoon tab={activeTab} />
       )}
+    </div>
+  )
+}
+
+/* ─── General Tab (Resumen + Legal + Documentos) ─────────── */
+
+function GeneralTab({ supplier, loading, onUpdate, supplierId }: ResumenTabProps & { supplierId: string | null }) {
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 0 }}>
+      <ResumenTab supplier={supplier} loading={loading} onUpdate={onUpdate} />
+      <div style={{ marginTop: 24 }}>
+        <LegalTab supplier={supplier} supplierId={supplierId} />
+      </div>
+      <div style={{ marginTop: 24 }}>
+        <DocumentosTab supplierId={supplierId} />
+      </div>
     </div>
   )
 }
