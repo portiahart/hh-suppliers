@@ -1,0 +1,2 @@
+[functions.extract-rut]
+verify_jwt = false
