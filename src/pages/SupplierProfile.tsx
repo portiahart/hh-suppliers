@@ -354,10 +354,20 @@ function IdentidadLegalCard({ supplier, loading, supplierId, onUpdate, prefill, 
             rep_legal_nombre, rep_legal_documento,
             razon_social, nombre_operativo, nit, documento_tipo, tipo_persona, email, telefono, status } = draft
 
-    // Save supplier fields
+    // Save supplier fields — coerce empty strings to null for constrained columns
     const { data: updatedSupplier, error: suppErr } = await supabase
       .from('accounts_suppliers')
-      .update({ razon_social, nombre_operativo, nit, documento_tipo, tipo_persona, email, telefono, status, updated_at: new Date().toISOString() })
+      .update({
+        razon_social,
+        nombre_operativo: nombre_operativo || null,
+        nit: nit || null,
+        documento_tipo: documento_tipo || null,
+        tipo_persona: tipo_persona || null,
+        email: email || null,
+        telefono: telefono || null,
+        status,
+        updated_at: new Date().toISOString(),
+      })
       .eq('id', supplierId)
       .select()
       .single()
