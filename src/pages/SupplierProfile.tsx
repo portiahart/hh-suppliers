@@ -128,6 +128,7 @@ export function SupplierProfile() {
 /* ─── Shared extracted-fields type ───────────────────────── */
 
 interface ExtractedFields {
+  nit?:                string | null
   tipo_persona:        'JURIDICA' | 'NATURAL' | null
   codigo_tributario:   string | null
   ciiu:                string | null
@@ -296,6 +297,7 @@ function IdentidadLegalCard({ supplier, loading, supplierId, onUpdate, prefill, 
     const ciudad = smartFill(base.ciudad, prefill.ciudad)
     setDraft({
       ...base,
+      nit:                 base.nit || prefill.nit || base.nit,
       tipo_persona:        smartFill(base.tipo_persona, prefill.tipo_persona)               ?? base.tipo_persona,
       email:               smartFill(base.email, prefill.email?.toLowerCase() ?? null, true) ?? base.email,
       telefono:            smartFillPhone(base.telefono, prefill.telefono)                  ?? base.telefono,
@@ -371,17 +373,17 @@ function IdentidadLegalCard({ supplier, loading, supplierId, onUpdate, prefill, 
       .eq('id', supplierId)
       .select()
       .single()
-    if (suppErr) { setSaving(false); showToast('Error al guardar.'); return }
+    if (suppErr) { setSaving(false); console.error('accounts_suppliers update error:', suppErr); showToast(`Error al guardar: ${suppErr.message}`); return }
 
     // Save legal fields
     const legalPayload = { supplier_id: supplierId, codigo_tributario, ciiu, direccion, ciudad, pais, proximity_zone, rep_legal_nombre, rep_legal_documento, updated_at: new Date().toISOString() }
     if (legalData?.id) {
       const { data: ld, error: lErr } = await supabase.from('suppliers_legal').update(legalPayload).eq('id', legalData.id).select().single()
-      if (lErr) { setSaving(false); showToast('Error al guardar datos legales.'); return }
+      if (lErr) { setSaving(false); console.error('suppliers_legal update error:', lErr); showToast(`Error al guardar datos legales: ${lErr.message}`); return }
       setLegalData(ld as LegalData)
     } else {
       const { data: ld, error: lErr } = await supabase.from('suppliers_legal').insert(legalPayload).select().single()
-      if (lErr) { setSaving(false); showToast('Error al guardar datos legales.'); return }
+      if (lErr) { setSaving(false); console.error('suppliers_legal insert error:', lErr); showToast(`Error al guardar datos legales: ${lErr.message}`); return }
       setLegalData(ld as LegalData)
     }
 

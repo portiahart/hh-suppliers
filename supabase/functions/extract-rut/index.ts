@@ -49,6 +49,7 @@ interface RUTData {
 
 // Prefill shape consumed by the frontend IdentidadLegalCard
 interface ExtractedFields {
+  nit:                 string | null
   tipo_persona:        'JURIDICA' | 'NATURAL' | null
   codigo_tributario:   string | null
   ciiu:                string | null
@@ -175,7 +176,12 @@ Deno.serve(async (req: Request) => {
 
     const claudeData = await claudeRes.json()
     const rawText: string = claudeData.content?.[0]?.text ?? ''
-    const jsonText = rawText.replace(/^```[a-z]*\n?/i, '').replace(/\n?```$/, '').trim()
+    // Strip markdown fences if present, then find the first { ... } block
+    const stripped = rawText.replace(/^```[a-z]*\n?/i, '').replace(/\n?```$/, '').trim()
+    const jsonStart = stripped.indexOf('{')
+    const jsonEnd = stripped.lastIndexOf('}')
+    if (jsonStart === -1 || jsonEnd === -1) throw new Error(`Claude did not return JSON. Response: ${stripped.slice(0, 200)}`)
+    const jsonText = stripped.slice(jsonStart, jsonEnd + 1)
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const p = JSON.parse(jsonText) as Record<string, any>
 
@@ -212,6 +218,7 @@ Deno.serve(async (req: Request) => {
 
     // Legacy prefill shape for IdentidadLegalCard
     const fields: ExtractedFields = {
+      nit:                 rut.nit,
       tipo_persona:        rut.tipo_persona,
       codigo_tributario:   responsabilidades.length > 0 ? responsabilidades.join('-') : null,
       ciiu:                rut.actividad_principal?.codigo ?? null,
