@@ -31,10 +31,27 @@ export function NewSupplierFlow() {
     }
 
     setSaving(true)
-    const { data, error: insertError } = await supabase
+
+    // 1) Write to Google Sheet + create base DB row via shared edge function
+    const { data: fnData, error: fnError } = await supabase.functions.invoke('add-supplier', {
+      body: {
+        razonSocial:     razonSocial.trim(),
+        nitCedula:       nit.trim() || '0',
+        nombreOperativo: nombreOperativo.trim() || undefined,
+      },
+    })
+
+    if (fnError || !fnData?.success) {
+      setSaving(false)
+      setError(fnData?.error || 'No se pudo crear el proveedor. Intenta de nuevo.')
+      return
+    }
+
+    // 2) Update the row with the extra fields the edge function doesn't set
+    const supplierId = (fnData.supplier as { id: string }).id
+    await supabase
       .from('accounts_suppliers')
-      .insert({
-        name:             razonSocial.trim(),
+      .update({
         razon_social:     razonSocial.trim(),
         nit:              nit.trim() || null,
         nombre_operativo: nombreOperativo.trim() || null,
@@ -42,15 +59,10 @@ export function NewSupplierFlow() {
         telefono:         telefono.trim() || null,
         status:           'ACTIVE',
       })
-      .select()
-      .single()
-    setSaving(false)
+      .eq('id', supplierId)
 
-    if (insertError) {
-      setError('No se pudo crear el proveedor. Intenta de nuevo.')
-    } else {
-      navigate(`/suppliers/${(data as { id: string }).id}`, { replace: true })
-    }
+    setSaving(false)
+    navigate(`/suppliers/${supplierId}`, { replace: true })
   }
 
   const canSave = razonSocial.trim().length > 0 && !saving
