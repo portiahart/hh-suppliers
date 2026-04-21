@@ -17,6 +17,7 @@ export function SupplierProfile() {
   const [supplier, setSupplier] = useState<Supplier | null>(null)
   const [loading, setLoading] = useState(true)
   const [activeTab, setActiveTab] = useState<Tab>('General')
+  const [bankingPrefill, setBankingPrefill] = useState<BankingFields | null>(null)
 
   useEffect(() => {
     if (!id) return
@@ -111,9 +112,9 @@ export function SupplierProfile() {
 
       {/* Tab content */}
       {activeTab === 'General' ? (
-        <GeneralTab supplier={supplier} loading={loading} onUpdate={setSupplier} supplierId={id ?? null} />
+        <GeneralTab supplier={supplier} loading={loading} onUpdate={setSupplier} supplierId={id ?? null} onExtractBanking={f => { setBankingPrefill(f); setActiveTab('Bancario') }} />
       ) : activeTab === 'Bancario' ? (
-        <BancarioTab supplierId={id ?? null} nit={supplier?.nit ?? null} />
+        <BancarioTab supplierId={id ?? null} prefill={bankingPrefill} onPrefillConsumed={() => setBankingPrefill(null)} />
       ) : activeTab === 'Evaluación' ? (
         <EvaluacionTab supplierId={id ?? null} />
       ) : activeTab === 'Gasto' ? (
@@ -125,7 +126,7 @@ export function SupplierProfile() {
   )
 }
 
-/* ─── Shared extracted-fields type ───────────────────────── */
+/* ─── Shared extracted-fields types ──────────────────────── */
 
 interface ExtractedFields {
   nit?:                string | null
@@ -139,6 +140,14 @@ interface ExtractedFields {
   telefono:            string | null
   rep_legal_nombre:    string | null
   rep_legal_documento: string | null
+}
+
+interface BankingFields {
+  nombre_beneficiario: string | null
+  banco: string | null
+  tipo_cuenta: 'Ahorros' | 'Corriente' | null
+  numero_cuenta: string | null
+  tipo_documento_bancolombia: 'NIT' | 'CC' | 'CE' | null
 }
 
 /* ─── Acceso Card ─────────────────────────────────────────── */
@@ -498,7 +507,7 @@ function IdentidadLegalCard({ supplier, loading, supplierId, onUpdate, prefill, 
 
 /* ─── General Tab (Resumen + Legal + Documentos) ─────────── */
 
-function GeneralTab({ supplier, loading, onUpdate, supplierId }: ResumenTabProps & { supplierId: string | null }) {
+function GeneralTab({ supplier, loading, onUpdate, supplierId, onExtractBanking }: ResumenTabProps & { supplierId: string | null; onExtractBanking?: (f: BankingFields) => void }) {
   const [prefill, setPrefill] = useState<ExtractedFields | null>(null)
   const [toast, setToast] = useState<string | null>(null)
   const [analysisKey, setAnalysisKey] = useState(0)
@@ -527,7 +536,7 @@ function GeneralTab({ supplier, loading, onUpdate, supplierId }: ResumenTabProps
         />
         <TributoriaCard key={analysisKey} supplierId={supplierId} onAnalyzed={onRUTAnalyzed} showToast={showToast} />
         <RetencionesCard key={`ret-${analysisKey}`} supplierId={supplierId} showToast={showToast} />
-        <DocumentosTab supplierId={supplierId} onExtract={setPrefill} onRetentionUpdated={onRUTAnalyzed} />
+        <DocumentosTab supplierId={supplierId} onExtract={setPrefill} onRetentionUpdated={onRUTAnalyzed} onExtractBanking={onExtractBanking} />
         <AccesoCard supplier={supplier} />
       </div>
     </>
@@ -1043,14 +1052,12 @@ interface BankingData {
 
 type BankingDraft = Omit<BankingData, 'id' | 'supplier_id' | 'verificado_at' | 'verificado_por'>
 
-function BancarioTab({ supplierId, nit }: { supplierId: string | null; nit: string | null }) {
-  useAuth()
+function BancarioTab({ supplierId, prefill, onPrefillConsumed }: { supplierId: string | null; prefill?: BankingFields | null; onPrefillConsumed?: () => void }) {
   const [data, setData] = useState<BankingData | null>(null)
   const [loading, setLoading] = useState(true)
   const [editing, setEditing] = useState(false)
   const [saving, setSaving] = useState(false)
   const [toast, setToast] = useState<string | null>(null)
-  const [syncing, setSyncing] = useState(false)
   const [draft, setDraft] = useState<BankingDraft>({
     nombre_beneficiario: null, banco: null, tipo_cuenta: null,
     numero_cuenta: null, tipo_documento_bancolombia: null, verificacion_notas: null,
@@ -1074,6 +1081,21 @@ function BancarioTab({ supplierId, nit }: { supplierId: string | null; nit: stri
     })()
   }, [supplierId])
 
+  useEffect(() => {
+    if (!prefill) return
+    setDraft(d => ({
+      nombre_beneficiario: prefill.nombre_beneficiario ?? d.nombre_beneficiario,
+      banco:                prefill.banco               ?? d.banco,
+      tipo_cuenta:          prefill.tipo_cuenta          ?? d.tipo_cuenta,
+      numero_cuenta:        prefill.numero_cuenta        ?? d.numero_cuenta,
+      tipo_documento_bancolombia: prefill.tipo_documento_bancolombia ?? d.tipo_documento_bancolombia,
+      verificacion_notas:   d.verificacion_notas,
+    }))
+    setEditing(true)
+    onPrefillConsumed?.()
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [prefill])
+
   const startEdit = () => {
     setDraft({
       nombre_beneficiario: data?.nombre_beneficiario ?? null,
@@ -1088,48 +1110,6 @@ function BancarioTab({ supplierId, nit }: { supplierId: string | null; nit: stri
 
   const cancelEdit = () => {
     setEditing(false)
-  }
-
-  const syncFromSheet = async () => {
-    if (!nit) { showToast('Sin NIT para buscar en hoja.'); return }
-    setSyncing(true)
-    try {
-      const { data: res, error } = await supabase.functions.invoke('get-reporte-data', {
-        body: { ranges: ['NIT', 'MAIN'] },
-      })
-      if (error || !res?.success) throw new Error(error?.message ?? res?.error ?? 'Error al leer hoja')
-      const nitRows: unknown[][] = res.ranges?.NIT ?? []
-      const mainRows: unknown[][] = res.ranges?.MAIN ?? []
-      // Both ranges are row-aligned; row 0 is header
-      const normalizeNit = (v: unknown) => String(v ?? '').replace(/\D/g, '')
-      const targetNit = normalizeNit(nit)
-      const rowIdx = nitRows.findIndex((row, i) => i > 0 && normalizeNit((row as unknown[])[0]) === targetNit)
-      if (rowIdx === -1) { showToast('NIT no encontrado en la hoja.'); setSyncing(false); return }
-      const match = mainRows[rowIdx] as unknown[] | undefined
-      if (!match) { showToast('Fila de datos bancarios no encontrada.'); setSyncing(false); return }
-      const cell = (i: number) => { const v = match[i]; return typeof v === 'string' && v.trim() ? v.trim() : null }
-      const normTipoCuenta = (v: string | null): string | null => {
-        if (!v) return null
-        const u = v.toUpperCase()
-        if (u.includes('AHORRO')) return 'Ahorros'
-        if (u.includes('CORRIENTE')) return 'Corriente'
-        return null
-      }
-      const sheetDraft: BankingDraft = {
-        nombre_beneficiario:        cell(14), // col O
-        numero_cuenta:              cell(15), // col P
-        tipo_cuenta:                normTipoCuenta(cell(16)), // col Q
-        banco:                      cell(17), // col R
-        tipo_documento_bancolombia: cell(18), // col S
-        verificacion_notas:         data?.verificacion_notas ?? null,
-      }
-      setDraft(sheetDraft)
-      setEditing(true)
-      showToast('Datos importados desde la hoja. Revisa y guarda.')
-    } catch (e) {
-      showToast(e instanceof Error ? e.message : 'Error al sincronizar.')
-    }
-    setSyncing(false)
   }
 
   const saveEdit = async () => {
@@ -1172,15 +1152,10 @@ function BancarioTab({ supplierId, nit }: { supplierId: string | null; nit: stri
           title="Datos Bancarios"
           action={
             !editing ? (
-              <div style={{ display: 'flex', gap: 8 }}>
-                <button onClick={syncFromSheet} disabled={syncing} style={ghostBtnStyle}>
-                  {syncing ? 'Importando…' : 'Importar desde hoja'}
-                </button>
-                <button onClick={startEdit} style={ghostBtnStyle}>
-                  <Pencil1Icon width={14} height={14} />
-                  {data ? 'Editar' : 'Agregar'}
-                </button>
-              </div>
+              <button onClick={startEdit} style={ghostBtnStyle}>
+                <Pencil1Icon width={14} height={14} />
+                {data ? 'Editar' : 'Agregar'}
+              </button>
             ) : (
               <div style={{ display: 'flex', gap: 8 }}>
                 <button onClick={cancelEdit} style={ghostBtnStyle}>Cancelar</button>
@@ -1299,7 +1274,7 @@ interface DocRow {
   uploaded_by: string | null
 }
 
-function DocumentosTab({ supplierId, onExtract, onRetentionUpdated }: { supplierId: string | null; onExtract?: (f: ExtractedFields) => void; onRetentionUpdated?: () => void }) {
+function DocumentosTab({ supplierId, onExtract, onRetentionUpdated, onExtractBanking }: { supplierId: string | null; onExtract?: (f: ExtractedFields) => void; onRetentionUpdated?: () => void; onExtractBanking?: (f: BankingFields) => void }) {
   const { session } = useAuth()
   const [docs, setDocs] = useState<DocRow[]>([])
   const [loading, setLoading] = useState(true)
@@ -1309,6 +1284,7 @@ function DocumentosTab({ supplierId, onExtract, onRetentionUpdated }: { supplier
   const [uploading, setUploading] = useState(false)
   const [deletingId, setDeletingId] = useState<string | null>(null)
   const [extractingId, setExtractingId] = useState<string | null>(null)
+  const [extractingBankingId, setExtractingBankingId] = useState<string | null>(null)
   const [rutBannerPath, setRutBannerPath] = useState<string | null>(null)
   const [analyzingRUT, setAnalyzingRUT] = useState(false)
 
@@ -1396,6 +1372,26 @@ function DocumentosTab({ supplierId, onExtract, onRetentionUpdated }: { supplier
       showToast(e instanceof Error ? e.message : 'Error al extraer datos.')
     }
     setExtractingId(null)
+  }
+
+  const handleExtractBanking = async (doc: DocRow) => {
+    if (!onExtractBanking) return
+    setExtractingBankingId(doc.id)
+    try {
+      const { data: urlData, error: urlErr } = await supabase.storage
+        .from('supplier-documents')
+        .createSignedUrl(doc.storage_path, 120)
+      if (urlErr || !urlData?.signedUrl) throw new Error('No se pudo generar enlace para el archivo.')
+      const { data: res, error: fnErr } = await supabase.functions.invoke('extract-banking', {
+        body: { url: urlData.signedUrl },
+      })
+      if (fnErr || !res?.success) throw new Error(fnErr?.message ?? res?.error ?? 'Error al extraer datos bancarios.')
+      onExtractBanking(res.fields as BankingFields)
+      showToast('Datos bancarios extraídos — revisa y guarda en la pestaña Bancario.')
+    } catch (e) {
+      showToast(e instanceof Error ? e.message : 'Error al extraer datos bancarios.')
+    }
+    setExtractingBankingId(null)
   }
 
   const handleAnalyzeRUT = async () => {
@@ -1574,6 +1570,15 @@ function DocumentosTab({ supplierId, onExtract, onRetentionUpdated }: { supplier
                           style={{ ...ghostBtnStyle, color: 'var(--hh-teal)', borderColor: 'var(--hh-teal)' }}
                         >
                           {extractingId === doc.id ? 'Extrayendo…' : 'Extraer datos'}
+                        </button>
+                      )}
+                      {onExtractBanking && doc.document_type === 'Certificado Bancario' && (
+                        <button
+                          onClick={() => handleExtractBanking(doc)}
+                          disabled={extractingBankingId === doc.id}
+                          style={{ ...ghostBtnStyle, color: 'var(--hh-teal)', borderColor: 'var(--hh-teal)' }}
+                        >
+                          {extractingBankingId === doc.id ? 'Extrayendo…' : 'Extraer datos'}
                         </button>
                       )}
                       <button onClick={() => handleDownload(doc)} style={ghostBtnStyle}>

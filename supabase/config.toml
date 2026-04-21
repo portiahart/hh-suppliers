@@ -1,2 +1,5 @@
 [functions.extract-rut]
 verify_jwt = false
+
+[functions.extract-banking]
+verify_jwt = false
