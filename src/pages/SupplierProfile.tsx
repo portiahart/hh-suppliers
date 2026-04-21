@@ -307,7 +307,7 @@ function IdentidadLegalCard({ supplier, loading, supplierId, onUpdate, prefill, 
     setDraft({
       ...base,
       nit:                 base.nit || prefill.nit || base.nit,
-      tipo_persona:        smartFill(base.tipo_persona, prefill.tipo_persona)               ?? base.tipo_persona,
+      tipo_persona:        smartFill(base.tipo_persona, prefill.tipo_persona, true)          ?? base.tipo_persona,
       email:               smartFill(base.email, prefill.email?.toLowerCase() ?? null, true) ?? base.email,
       telefono:            smartFillPhone(base.telefono, prefill.telefono)                  ?? base.telefono,
       codigo_tributario:   smartFill(base.codigo_tributario, prefill.codigo_tributario),
