@@ -3,6 +3,20 @@ import { useNavigate, Link } from 'react-router-dom'
 import { ArrowLeftIcon } from '@radix-ui/react-icons'
 import { supabase, suppliersQuery } from '../lib/supabase'
 
+// Simple token overlap similarity (0–1)
+function tokenSimilarity(a: string, b: string): number {
+  const tokensA = new Set(a.split(/\s+/).filter(Boolean))
+  const tokensB = new Set(b.split(/\s+/).filter(Boolean))
+  if (tokensA.size === 0 && tokensB.size === 0) return 1
+  let shared = 0
+  for (const t of tokensA) if (tokensB.has(t)) shared++
+  return shared / Math.max(tokensA.size, tokensB.size)
+}
+
+function normName(s: string): string {
+  return s.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9\s]/g, '').replace(/\s+/g, ' ').trim()
+}
+
 export function NewSupplierFlow() {
   const navigate = useNavigate()
 
@@ -14,8 +28,13 @@ export function NewSupplierFlow() {
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [duplicateId, setDuplicateId] = useState<string | null>(null)
+  const [existingHasRut, setExistingHasRut] = useState<boolean | null>(null)
+  const [merging, setMerging] = useState(false)
+
+  const [similarNames, setSimilarNames] = useState<{ id: string; name: string }[]>([])
 
   const [rutFile, setRutFile] = useState<File | null>(null)
+  const [rutTempPath, setRutTempPath] = useState<string | null>(null)
   const [extracting, setExtracting] = useState(false)
   const [extractError, setExtractError] = useState<string | null>(null)
   const [extracted, setExtracted] = useState(false)
@@ -41,15 +60,22 @@ export function NewSupplierFlow() {
         body: { url: urlData.signedUrl },
       })
 
-      // Clean up temp file (fire and forget)
-      void supabase.storage.from('supplier-documents').remove([tempPath])
+      // Keep temp file — will be moved to supplier path after creation
+      // (only clean up on error)
+      if (fnErr || !res?.success) {
+        void supabase.storage.from('supplier-documents').remove([tempPath])
+        throw new Error(fnErr?.message ?? res?.error ?? 'Error al extraer datos.')
+      }
 
-      if (fnErr || !res?.success) throw new Error(fnErr?.message ?? res?.error ?? 'Error al extraer datos.')
+      setRutTempPath(tempPath)
 
       const rut = res.rut as { razon_social?: string | null }
       const fields = res.fields as { nit?: string | null; email?: string | null; telefono?: string | null }
 
-      if (rut.razon_social) setRazonSocial(rut.razon_social)
+      if (rut.razon_social) {
+        setRazonSocial(rut.razon_social)
+        void checkSimilarNames(rut.razon_social)
+      }
       if (fields.nit)       setNit(fields.nit.replace(/\D/g, '').slice(0, 10))
       if (fields.email)     setEmail(fields.email)
       if (fields.telefono)  setTelefono(fields.telefono)
@@ -60,16 +86,38 @@ export function NewSupplierFlow() {
     setExtracting(false)
   }
 
+  const checkSimilarNames = async (name: string) => {
+    if (name.trim().length < 3) return
+    const words = name.trim().split(/\s+/).filter(w => w.length >= 3)
+    if (words.length === 0) return
+    const { data } = await suppliersQuery('id, razon_social')
+      .ilike('razon_social', `%${words[0]}%`)
+      .limit(20)
+    const normInput = normName(name)
+    const similar = (data as unknown as { id: string; razon_social: string }[] ?? [])
+      .filter(s => {
+        const n = normName(s.razon_social)
+        return n !== normInput && (n.includes(normInput) || normInput.includes(n) || tokenSimilarity(normInput, n) > 0.5)
+      })
+      .slice(0, 3)
+    setSimilarNames(similar.map(s => ({ id: s.id, name: s.razon_social })))
+  }
+
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault()
     setError(null)
     setDuplicateId(null)
+    setExistingHasRut(null)
 
-    // Check for duplicate NIT
+    // Block on duplicate NIT
     if (nit.trim()) {
       const { data: existing } = await suppliersQuery('id').eq('nit', nit.trim()).maybeSingle()
       if (existing) {
-        setDuplicateId((existing as unknown as { id: string }).id)
+        const existingId = (existing as unknown as { id: string }).id
+        setDuplicateId(existingId)
+        const { data: rutDocs } = await supabase.from('suppliers_documents')
+          .select('id').eq('supplier_id', existingId).eq('document_type', 'RUT').limit(1)
+        setExistingHasRut((rutDocs?.length ?? 0) > 0)
         setError('Ya existe un proveedor con este NIT.')
         return
       }
@@ -77,7 +125,6 @@ export function NewSupplierFlow() {
 
     setSaving(true)
 
-    // 1) Write to Google Sheet + create base DB row via shared edge function
     const { data: fnData, error: fnError } = await supabase.functions.invoke('add-supplier', {
       body: {
         razonSocial:     razonSocial.trim(),
@@ -92,7 +139,6 @@ export function NewSupplierFlow() {
       return
     }
 
-    // 2) Update the row with the extra fields the edge function doesn't set
     const supplierId = (fnData.supplier as { id: string }).id
     await supabase
       .from('accounts_suppliers')
@@ -106,8 +152,49 @@ export function NewSupplierFlow() {
       })
       .eq('id', supplierId)
 
+    // If a RUT was extracted, move temp file to the supplier's permanent path
+    if (rutFile && rutTempPath) {
+      const slugify = (s: string) => s.normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-zA-Z0-9._-]/g, '_')
+      const finalPath = `${supplierId}/RUT/${Date.now()}_${slugify(rutFile.name)}`
+      const { error: copyErr } = await supabase.storage
+        .from('supplier-documents')
+        .copy(rutTempPath, finalPath)
+      void supabase.storage.from('supplier-documents').remove([rutTempPath])
+      if (!copyErr) {
+        await supabase.from('suppliers_documents').insert({
+          supplier_id:     supplierId,
+          document_type:   'RUT',
+          storage_path:    finalPath,
+          file_name:       rutFile.name,
+          file_size_bytes: rutFile.size,
+          mime_type:       rutFile.type || 'application/pdf',
+        })
+      }
+    }
+
     setSaving(false)
     navigate(`/suppliers/${supplierId}`, { replace: true })
+  }
+
+  // Merge: upload the RUT file to the existing supplier and navigate there
+  const handleMerge = async () => {
+    if (!rutFile || !duplicateId) return
+    setMerging(true)
+    const slugify = (s: string) => s.normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-zA-Z0-9._-]/g, '_')
+    const storagePath = `${duplicateId}/RUT/${Date.now()}_${slugify(rutFile.name)}`
+    const { error: upErr } = await supabase.storage
+      .from('supplier-documents')
+      .upload(storagePath, rutFile)
+    if (upErr) { setMerging(false); setError(`Error al subir RUT: ${upErr.message}`); return }
+    await supabase.from('suppliers_documents').insert({
+      supplier_id:     duplicateId,
+      document_type:   'RUT',
+      storage_path:    storagePath,
+      file_name:       rutFile.name,
+      file_size_bytes: rutFile.size,
+      mime_type:       rutFile.type || 'application/pdf',
+    })
+    navigate(`/suppliers/${duplicateId}`, { replace: true })
   }
 
   const canSave = razonSocial.trim().length > 0 && !saving
@@ -226,13 +313,28 @@ export function NewSupplierFlow() {
               <input
                 type="text"
                 value={razonSocial}
-                onChange={e => setRazonSocial(e.target.value)}
+                onChange={e => { setRazonSocial(e.target.value); setSimilarNames([]) }}
+                onBlur={e => { if (e.target.value.trim().length >= 3) void checkSimilarNames(e.target.value) }}
                 required
                 autoFocus
                 style={inputStyle}
                 onFocus={e => { e.currentTarget.style.borderColor = 'var(--hh-teal)' }}
-                onBlur={e => { e.currentTarget.style.borderColor = 'rgba(122,145,165,0.4)' }}
               />
+              {similarNames.length > 0 && (
+                <div style={{ marginTop: 6, padding: '8px 10px', background: 'rgba(255,181,36,0.08)', border: '1px solid rgba(255,181,36,0.3)', borderRadius: 5 }}>
+                  <div style={{ fontFamily: 'var(--font-body)', fontSize: '0.75rem', color: 'var(--hh-mango)', marginBottom: 4 }}>
+                    Posibles duplicados — revisa antes de crear:
+                  </div>
+                  {similarNames.map(s => (
+                    <div key={s.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', paddingTop: 2 }}>
+                      <span style={{ fontFamily: 'var(--font-body)', fontSize: '0.8125rem', color: 'var(--hh-dark)' }}>{s.name}</span>
+                      <Link to={`/suppliers/${s.id}`} style={{ fontFamily: 'var(--font-body)', fontSize: '0.75rem', color: 'var(--hh-teal)', textDecoration: 'underline', textUnderlineOffset: 2, whiteSpace: 'nowrap', marginLeft: 10 }}>
+                        Ver perfil →
+                      </Link>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
 
             <div>
@@ -240,7 +342,7 @@ export function NewSupplierFlow() {
               <input
                 type="text"
                 value={nit}
-                onChange={e => { setNit(e.target.value.replace(/\D/g, '').slice(0, 10)); setDuplicateId(null); setError(null) }}
+                onChange={e => { setNit(e.target.value.replace(/\D/g, '').slice(0, 10)); setDuplicateId(null); setExistingHasRut(null); setError(null) }}
                 placeholder="Sin puntos ni dígito de verificación"
                 style={inputStyle}
                 onFocus={e => { e.currentTarget.style.borderColor = 'var(--hh-teal)' }}
@@ -297,12 +399,27 @@ export function NewSupplierFlow() {
               <div style={{ fontSize: '0.8125rem', color: 'var(--hh-mango)', margin: 0 }}>
                 {error}
                 {duplicateId && (
-                  <>
-                    {' '}
+                  <div style={{ marginTop: 8, display: 'flex', gap: 10, flexWrap: 'wrap' }}>
                     <Link to={`/suppliers/${duplicateId}`} style={{ color: 'var(--hh-teal)', textDecoration: 'underline', textUnderlineOffset: 2 }}>
                       Ver perfil →
                     </Link>
-                  </>
+                    {rutFile && existingHasRut === false && (
+                      <button
+                        type="button"
+                        disabled={merging}
+                        onClick={() => void handleMerge()}
+                        style={{
+                          fontFamily: 'var(--font-body)', fontWeight: 500,
+                          fontSize: '0.8125rem', color: '#fff',
+                          background: merging ? 'rgba(74,155,142,0.5)' : 'var(--hh-teal)',
+                          border: 'none', borderRadius: 5, padding: '4px 12px',
+                          cursor: merging ? 'not-allowed' : 'pointer',
+                        }}
+                      >
+                        {merging ? 'Fusionando…' : 'Subir RUT al perfil existente →'}
+                      </button>
+                    )}
+                  </div>
                 )}
               </div>
             )}

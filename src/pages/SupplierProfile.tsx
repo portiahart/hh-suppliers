@@ -384,17 +384,13 @@ function IdentidadLegalCard({ supplier, loading, supplierId, onUpdate, prefill, 
       .single()
     if (suppErr) { setSaving(false); console.error('accounts_suppliers update error:', suppErr); showToast(`Error al guardar: ${suppErr.message}`); return }
 
-    // Save legal fields
+    // Save legal fields — upsert to avoid duplicate key when row was created by RUT extraction
     const legalPayload = { supplier_id: supplierId, codigo_tributario, ciiu, direccion, ciudad, pais, proximity_zone, rep_legal_nombre, rep_legal_documento, updated_at: new Date().toISOString() }
-    if (legalData?.id) {
-      const { data: ld, error: lErr } = await supabase.from('suppliers_legal').update(legalPayload).eq('id', legalData.id).select().single()
-      if (lErr) { setSaving(false); console.error('suppliers_legal update error:', lErr); showToast(`Error al guardar datos legales: ${lErr.message}`); return }
-      setLegalData(ld as LegalData)
-    } else {
-      const { data: ld, error: lErr } = await supabase.from('suppliers_legal').insert(legalPayload).select().single()
-      if (lErr) { setSaving(false); console.error('suppliers_legal insert error:', lErr); showToast(`Error al guardar datos legales: ${lErr.message}`); return }
-      setLegalData(ld as LegalData)
-    }
+    const { data: ld, error: lErr } = await supabase.from('suppliers_legal')
+      .upsert(legalPayload, { onConflict: 'supplier_id' })
+      .select().single()
+    if (lErr) { setSaving(false); console.error('suppliers_legal upsert error:', lErr); showToast(`Error al guardar datos legales: ${lErr.message}`); return }
+    setLegalData(ld as LegalData)
 
     onUpdate(updatedSupplier as Supplier)
     setSaving(false)
