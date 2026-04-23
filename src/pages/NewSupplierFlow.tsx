@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import { useNavigate, Link } from 'react-router-dom'
 import { ArrowLeftIcon } from '@radix-ui/react-icons'
 import { supabase, suppliersQuery } from '../lib/supabase'
@@ -14,6 +14,51 @@ export function NewSupplierFlow() {
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [duplicateId, setDuplicateId] = useState<string | null>(null)
+
+  const [rutFile, setRutFile] = useState<File | null>(null)
+  const [extracting, setExtracting] = useState(false)
+  const [extractError, setExtractError] = useState<string | null>(null)
+  const [extracted, setExtracted] = useState(false)
+  const rutInputRef = useRef<HTMLInputElement>(null)
+
+  const handleRutExtract = async (file: File) => {
+    setExtracting(true)
+    setExtractError(null)
+    setExtracted(false)
+    try {
+      const tempPath = `_temp/${crypto.randomUUID()}-${file.name}`
+      const { error: upErr } = await supabase.storage
+        .from('supplier-documents')
+        .upload(tempPath, file, { contentType: file.type || 'application/pdf' })
+      if (upErr) throw new Error(`Error al subir: ${upErr.message}`)
+
+      const { data: urlData, error: urlErr } = await supabase.storage
+        .from('supplier-documents')
+        .createSignedUrl(tempPath, 120)
+      if (urlErr || !urlData?.signedUrl) throw new Error('No se pudo generar enlace.')
+
+      const { data: res, error: fnErr } = await supabase.functions.invoke('extract-rut', {
+        body: { url: urlData.signedUrl },
+      })
+
+      // Clean up temp file (fire and forget)
+      void supabase.storage.from('supplier-documents').remove([tempPath])
+
+      if (fnErr || !res?.success) throw new Error(fnErr?.message ?? res?.error ?? 'Error al extraer datos.')
+
+      const rut = res.rut as { razon_social?: string | null }
+      const fields = res.fields as { nit?: string | null; email?: string | null; telefono?: string | null }
+
+      if (rut.razon_social) setRazonSocial(rut.razon_social)
+      if (fields.nit)       setNit(fields.nit.replace(/\D/g, '').slice(0, 10))
+      if (fields.email)     setEmail(fields.email)
+      if (fields.telefono)  setTelefono(fields.telefono)
+      setExtracted(true)
+    } catch (e) {
+      setExtractError(e instanceof Error ? e.message : 'Error al extraer datos del RUT.')
+    }
+    setExtracting(false)
+  }
 
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -95,6 +140,83 @@ export function NewSupplierFlow() {
           }}>
             Nuevo Proveedor
           </h1>
+
+          {/* RUT upload section */}
+          <div style={{
+            background: 'var(--hh-ice)',
+            border: `1px solid ${extracted ? 'var(--hh-teal)' : 'rgba(122,145,165,0.25)'}`,
+            borderRadius: 8,
+            padding: '16px 18px',
+            marginBottom: 24,
+          }}>
+            <div style={{
+              fontFamily: 'var(--font-body)', fontWeight: 500,
+              fontSize: '0.6875rem', textTransform: 'uppercase',
+              letterSpacing: '0.12em', color: 'var(--hh-teal)', marginBottom: 10,
+            }}>
+              Autocompletar desde RUT
+            </div>
+            <input
+              ref={rutInputRef}
+              id="rut-file-input"
+              type="file"
+              accept=".pdf,image/*"
+              style={{ display: 'none' }}
+              onChange={e => {
+                const f = e.target.files?.[0] ?? null
+                setRutFile(f)
+                setExtracted(false)
+                setExtractError(null)
+              }}
+            />
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+              <button
+                type="button"
+                onClick={() => rutInputRef.current?.click()}
+                disabled={extracting}
+                style={{
+                  fontFamily: 'var(--font-body)', fontWeight: 400,
+                  fontSize: '0.8125rem', color: 'var(--hh-dark)',
+                  background: '#fff', border: '1px solid rgba(122,145,165,0.4)',
+                  borderRadius: 5, padding: '7px 12px',
+                  cursor: extracting ? 'not-allowed' : 'pointer',
+                  whiteSpace: 'nowrap',
+                }}
+              >
+                {rutFile ? rutFile.name : 'Seleccionar RUT…'}
+              </button>
+              {rutFile && !extracting && !extracted && (
+                <button
+                  type="button"
+                  onClick={() => void handleRutExtract(rutFile)}
+                  style={{
+                    fontFamily: 'var(--font-body)', fontWeight: 500,
+                    fontSize: '0.8125rem', color: '#fff',
+                    background: 'var(--hh-teal)', border: 'none',
+                    borderRadius: 5, padding: '7px 14px',
+                    cursor: 'pointer', whiteSpace: 'nowrap',
+                  }}
+                >
+                  Extraer datos
+                </button>
+              )}
+              {extracting && (
+                <span style={{ fontFamily: 'var(--font-body)', fontSize: '0.8125rem', color: 'var(--hh-haze)' }}>
+                  Extrayendo…
+                </span>
+              )}
+              {extracted && (
+                <span style={{ fontFamily: 'var(--font-body)', fontSize: '0.8125rem', color: 'var(--hh-teal)' }}>
+                  Datos completados — revisa y guarda.
+                </span>
+              )}
+            </div>
+            {extractError && (
+              <div style={{ marginTop: 8, fontFamily: 'var(--font-body)', fontSize: '0.8125rem', color: 'var(--hh-mango)' }}>
+                {extractError}
+              </div>
+            )}
+          </div>
 
           <form onSubmit={e => void handleCreate(e)} style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
             <div>
