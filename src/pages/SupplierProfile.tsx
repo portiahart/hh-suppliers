@@ -229,6 +229,40 @@ function smartFillAddress(existing: string | null | undefined, extracted: string
 
 /* ─── IdentidadLegal Card (merged) ───────────────────────── */
 
+interface MergeConflict {
+  id: string
+  razon_social: string | null
+  nombre_operativo: string | null
+  nit: string | null
+  tipo_persona: string | null
+  email: string | null
+  telefono: string | null
+  status: string
+  legal: {
+    codigo_tributario: string | null
+    ciiu: string | null
+    direccion: string | null
+    ciudad: string | null
+    pais: string | null
+    rep_legal_nombre: string | null
+    rep_legal_documento: string | null
+  } | null
+}
+
+const MERGE_FIELDS: { key: string; label: string }[] = [
+  { key: 'razon_social',        label: 'Razón Social' },
+  { key: 'nombre_operativo',    label: 'Nombre Operativo' },
+  { key: 'tipo_persona',        label: 'Tipo de Persona' },
+  { key: 'email',               label: 'Email' },
+  { key: 'telefono',            label: 'Teléfono' },
+  { key: 'codigo_tributario',   label: 'Responsabilidades' },
+  { key: 'ciiu',                label: 'CIIU' },
+  { key: 'direccion',           label: 'Dirección' },
+  { key: 'ciudad',              label: 'Ciudad' },
+  { key: 'rep_legal_nombre',    label: 'Representante Legal' },
+  { key: 'rep_legal_documento', label: 'Doc. Rep. Legal' },
+]
+
 interface IdentidadLegalDraft {
   razon_social: string
   nombre_operativo: string
@@ -256,10 +290,14 @@ function IdentidadLegalCard({ supplier, loading, supplierId, onUpdate, prefill, 
   prefill?: ExtractedFields | null
   onPrefillConsumed?: () => void
 }) {
+  const navigate = useNavigate()
   const [legalData, setLegalData] = useState<LegalData | null>(null)
   const [editing, setEditing] = useState(false)
   const [saving, setSaving] = useState(false)
   const [toast, setToast] = useState<string | null>(null)
+  const [mergeConflict, setMergeConflict] = useState<MergeConflict | null>(null)
+  const [mergeChoices, setMergeChoices] = useState<Record<string, 'mine' | 'theirs'>>({})
+  const [merging, setMerging] = useState(false)
   const [draft, setDraft] = useState<IdentidadLegalDraft>({
     razon_social: '', nombre_operativo: '', nit: '', documento_tipo: '',
     tipo_persona: '', email: '', telefono: '', status: 'ACTIVE',
@@ -350,6 +388,39 @@ function IdentidadLegalCard({ supplier, loading, supplierId, onUpdate, prefill, 
 
   const cancelEdit = () => setEditing(false)
 
+  const confirmMerge = async () => {
+    if (!mergeConflict) return
+    setMerging(true)
+    const pick = (key: string, mine: string | null, theirs: string | null) =>
+      mergeChoices[key] === 'mine' ? mine : theirs
+    const { error: suppErr } = await supabase
+      .from('accounts_suppliers')
+      .update({
+        razon_social:     pick('razon_social',     draft.razon_social || null,     mergeConflict.razon_social),
+        nombre_operativo: pick('nombre_operativo', draft.nombre_operativo || null, mergeConflict.nombre_operativo) || null,
+        tipo_persona:     pick('tipo_persona',     draft.tipo_persona || null,     mergeConflict.tipo_persona) || null,
+        email:            pick('email',            draft.email || null,            mergeConflict.email) || null,
+        telefono:         pick('telefono',         draft.telefono || null,         mergeConflict.telefono) || null,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', mergeConflict.id)
+    if (suppErr) { setMerging(false); showToast(`Error al fusionar: ${suppErr.message}`); return }
+    await supabase.from('suppliers_legal').upsert({
+      supplier_id:         mergeConflict.id,
+      codigo_tributario:   pick('codigo_tributario',   draft.codigo_tributario,   mergeConflict.legal?.codigo_tributario ?? null),
+      ciiu:                pick('ciiu',                draft.ciiu,                mergeConflict.legal?.ciiu ?? null),
+      direccion:           pick('direccion',           draft.direccion,           mergeConflict.legal?.direccion ?? null),
+      ciudad:              pick('ciudad',              draft.ciudad,              mergeConflict.legal?.ciudad ?? null),
+      pais:                draft.pais || mergeConflict.legal?.pais || 'Colombia',
+      rep_legal_nombre:    pick('rep_legal_nombre',    draft.rep_legal_nombre,    mergeConflict.legal?.rep_legal_nombre ?? null),
+      rep_legal_documento: pick('rep_legal_documento', draft.rep_legal_documento, mergeConflict.legal?.rep_legal_documento ?? null),
+      updated_at: new Date().toISOString(),
+    }, { onConflict: 'supplier_id' })
+    setMerging(false)
+    setMergeConflict(null)
+    navigate(`/suppliers/${mergeConflict.id}`)
+  }
+
   const setField = <K extends keyof IdentidadLegalDraft>(key: K, value: IdentidadLegalDraft[K]) => {
     setDraft(d => {
       const next = { ...d, [key]: value }
@@ -364,6 +435,45 @@ function IdentidadLegalCard({ supplier, loading, supplierId, onUpdate, prefill, 
     const { codigo_tributario, ciiu, direccion, ciudad, pais, proximity_zone,
             rep_legal_nombre, rep_legal_documento,
             razon_social, nombre_operativo, nit, documento_tipo, tipo_persona, email, telefono, status } = draft
+
+    // Guard: check the NIT isn't already taken by a different supplier row
+    if (nit) {
+      const { data: conflict } = await supabase
+        .from('accounts_suppliers')
+        .select('id, razon_social, nombre_operativo, nit, tipo_persona, email, telefono, status')
+        .eq('nit', nit)
+        .neq('id', supplierId)
+        .maybeSingle()
+      if (conflict) {
+        setSaving(false)
+        const c = conflict as MergeConflict
+        const { data: cLegal } = await supabase
+          .from('suppliers_legal')
+          .select('codigo_tributario, ciiu, direccion, ciudad, pais, rep_legal_nombre, rep_legal_documento')
+          .eq('supplier_id', c.id)
+          .maybeSingle()
+        const fullConflict: MergeConflict = { ...c, legal: (cLegal as MergeConflict['legal']) ?? null }
+        // Default: prefer 'theirs' when they have data, 'mine' when they don't
+        const draftVals: Record<string, string | null> = {
+          razon_social: draft.razon_social || null, nombre_operativo: draft.nombre_operativo || null,
+          tipo_persona: draft.tipo_persona || null, email: draft.email || null, telefono: draft.telefono || null,
+          codigo_tributario: draft.codigo_tributario, ciiu: draft.ciiu, direccion: draft.direccion,
+          ciudad: draft.ciudad, rep_legal_nombre: draft.rep_legal_nombre, rep_legal_documento: draft.rep_legal_documento,
+        }
+        const theirVals: Record<string, string | null> = {
+          razon_social: fullConflict.razon_social, nombre_operativo: fullConflict.nombre_operativo,
+          tipo_persona: fullConflict.tipo_persona, email: fullConflict.email, telefono: fullConflict.telefono,
+          codigo_tributario: fullConflict.legal?.codigo_tributario ?? null, ciiu: fullConflict.legal?.ciiu ?? null,
+          direccion: fullConflict.legal?.direccion ?? null, ciudad: fullConflict.legal?.ciudad ?? null,
+          rep_legal_nombre: fullConflict.legal?.rep_legal_nombre ?? null, rep_legal_documento: fullConflict.legal?.rep_legal_documento ?? null,
+        }
+        const defaults: Record<string, 'mine' | 'theirs'> = {}
+        for (const { key } of MERGE_FIELDS) defaults[key] = theirVals[key] ? 'theirs' : 'mine'
+        setMergeChoices(defaults)
+        setMergeConflict(fullConflict)
+        return
+      }
+    }
 
     // Save supplier fields — coerce empty strings to null for constrained columns
     const { data: updatedSupplier, error: suppErr } = await supabase
@@ -497,6 +607,113 @@ function IdentidadLegalCard({ supplier, loading, supplierId, onUpdate, prefill, 
           </div>
         )}
       </SectionCard>
+
+      {mergeConflict && (() => {
+        const draftVals: Record<string, string | null> = {
+          razon_social: draft.razon_social || null, nombre_operativo: draft.nombre_operativo || null,
+          tipo_persona: draft.tipo_persona || null, email: draft.email || null, telefono: draft.telefono || null,
+          codigo_tributario: draft.codigo_tributario, ciiu: draft.ciiu, direccion: draft.direccion,
+          ciudad: draft.ciudad, rep_legal_nombre: draft.rep_legal_nombre, rep_legal_documento: draft.rep_legal_documento,
+        }
+        const theirVals: Record<string, string | null> = {
+          razon_social: mergeConflict.razon_social, nombre_operativo: mergeConflict.nombre_operativo,
+          tipo_persona: mergeConflict.tipo_persona, email: mergeConflict.email, telefono: mergeConflict.telefono,
+          codigo_tributario: mergeConflict.legal?.codigo_tributario ?? null, ciiu: mergeConflict.legal?.ciiu ?? null,
+          direccion: mergeConflict.legal?.direccion ?? null, ciudad: mergeConflict.legal?.ciudad ?? null,
+          rep_legal_nombre: mergeConflict.legal?.rep_legal_nombre ?? null, rep_legal_documento: mergeConflict.legal?.rep_legal_documento ?? null,
+        }
+        return (
+          <div style={{
+            position: 'fixed', inset: 0, background: 'rgba(15,25,38,0.55)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            zIndex: 200, padding: 24,
+          }}>
+            <div style={{
+              background: '#fff', borderRadius: 12, width: '100%', maxWidth: 660,
+              maxHeight: '90vh', display: 'flex', flexDirection: 'column',
+              boxShadow: '0 8px 40px rgba(0,0,0,0.18)',
+            }}>
+              {/* Header */}
+              <div style={{ padding: '24px 28px 0', flexShrink: 0 }}>
+                <p style={{ fontFamily: 'var(--font-body)', fontSize: '0.6875rem', fontWeight: 500, textTransform: 'uppercase', letterSpacing: '0.12em', color: 'var(--hh-mango)', marginBottom: 6 }}>
+                  Conflicto de NIT
+                </p>
+                <h2 style={{ fontFamily: 'var(--font-display)', fontWeight: 300, fontSize: '1.25rem', color: 'var(--hh-dark)', margin: '0 0 8px' }}>
+                  ¿Fusionar proveedores?
+                </h2>
+                <p style={{ fontFamily: 'var(--font-body)', fontWeight: 300, fontSize: '0.8125rem', color: 'var(--hh-haze)', margin: '0 0 20px', lineHeight: 1.5 }}>
+                  El NIT <strong style={{ color: 'var(--hh-dark)', fontWeight: 500 }}>{mergeConflict.nit}</strong> ya existe en otro perfil.
+                  Selecciona qué información conservar en el perfil existente y luego confirma la fusión.
+                </p>
+                {/* Column headers */}
+                <div style={{ display: 'grid', gridTemplateColumns: '140px 1fr 1fr', gap: 8, paddingBottom: 8, borderBottom: '1px solid rgba(122,145,165,0.15)' }}>
+                  <div />
+                  <div style={{ fontFamily: 'var(--font-body)', fontSize: '0.6875rem', fontWeight: 500, textTransform: 'uppercase', letterSpacing: '0.1em', color: 'var(--hh-haze)' }}>Este perfil</div>
+                  <div style={{ fontFamily: 'var(--font-body)', fontSize: '0.6875rem', fontWeight: 500, textTransform: 'uppercase', letterSpacing: '0.1em', color: 'var(--hh-haze)' }}>
+                    Perfil existente
+                  </div>
+                </div>
+              </div>
+              {/* Rows */}
+              <div style={{ overflowY: 'auto', padding: '8px 28px', flex: 1 }}>
+                {MERGE_FIELDS.map(({ key, label }) => {
+                  const mine = draftVals[key]
+                  const theirs = theirVals[key]
+                  const same = mine === theirs
+                  const chosen = mergeChoices[key] ?? 'theirs'
+                  return (
+                    <div key={key} style={{ display: 'grid', gridTemplateColumns: '140px 1fr 1fr', gap: 8, padding: '6px 0', borderBottom: '1px solid rgba(122,145,165,0.07)', alignItems: 'start' }}>
+                      <span style={{ fontFamily: 'var(--font-body)', fontSize: '0.75rem', fontWeight: 500, color: 'var(--hh-haze)', paddingTop: 8 }}>{label}</span>
+                      {(['mine', 'theirs'] as const).map(side => {
+                        const val = side === 'mine' ? mine : theirs
+                        const isChosen = same || chosen === side
+                        return (
+                          <button
+                            key={side}
+                            type="button"
+                            disabled={same}
+                            onClick={() => setMergeChoices(c => ({ ...c, [key]: side }))}
+                            style={{
+                              textAlign: 'left', fontFamily: 'var(--font-body)', fontWeight: 300,
+                              fontSize: '0.8125rem', lineHeight: 1.4, padding: '6px 10px',
+                              borderRadius: 6, border: isChosen ? '1.5px solid var(--hh-teal)' : '1.5px solid transparent',
+                              background: isChosen ? 'rgba(74,155,142,0.07)' : 'var(--hh-ice)',
+                              color: val ? 'var(--hh-dark)' : 'var(--hh-haze)',
+                              cursor: same ? 'default' : 'pointer',
+                              wordBreak: 'break-word',
+                            }}
+                          >
+                            {val || <span style={{ fontStyle: 'italic' }}>—</span>}
+                          </button>
+                        )
+                      })}
+                    </div>
+                  )
+                })}
+              </div>
+              {/* Footer */}
+              <div style={{ padding: '16px 28px 24px', display: 'flex', justifyContent: 'flex-end', gap: 10, borderTop: '1px solid rgba(122,145,165,0.1)', flexShrink: 0 }}>
+                <button
+                  type="button"
+                  onClick={() => setMergeConflict(null)}
+                  disabled={merging}
+                  style={{ fontFamily: 'var(--font-body)', fontSize: '0.875rem', fontWeight: 400, color: 'var(--hh-haze)', background: 'transparent', border: '1px solid rgba(122,145,165,0.3)', borderRadius: 6, padding: '9px 20px', cursor: 'pointer' }}
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void confirmMerge()}
+                  disabled={merging}
+                  style={{ fontFamily: 'var(--font-body)', fontSize: '0.875rem', fontWeight: 500, color: '#fff', background: merging ? 'rgba(74,155,142,0.5)' : 'var(--hh-teal)', border: 'none', borderRadius: 6, padding: '9px 24px', cursor: merging ? 'not-allowed' : 'pointer' }}
+                >
+                  {merging ? 'Fusionando…' : 'Fusionar →'}
+                </button>
+              </div>
+            </div>
+          </div>
+        )
+      })()}
     </>
   )
 }
@@ -653,12 +870,8 @@ async function updateLegalFromRUT(supplierId: string, rut: RUTData): Promise<voi
   const payload: Record<string, string | null> = { updated_at: new Date().toISOString() }
   if (ciiu) payload.ciiu = ciiu
   if (codigo_tributario) payload.codigo_tributario = codigo_tributario
-  const { data: existing } = await supabase.from('suppliers_legal').select('id').eq('supplier_id', supplierId).maybeSingle()
-  if (existing?.id) {
-    await supabase.from('suppliers_legal').update(payload).eq('id', existing.id)
-  } else {
-    await supabase.from('suppliers_legal').insert({ supplier_id: supplierId, ...payload })
-  }
+  await supabase.from('suppliers_legal')
+    .upsert({ supplier_id: supplierId, ...payload }, { onConflict: 'supplier_id' })
 }
 
 /* ─── Tributaria Card ────────────────────────────────────── */
