@@ -33,8 +33,7 @@ function conceptLabel(c: ConceptoFuente): string {
 // Rates confirmed by accountant. Stored as percentages (%).
 // ⚠️ To update: change these two constants only.
 const ICA_SERVICIOS = 0.856  // % — all service activities
-const ICA_PRODUCTOS = 0.7    // % — commercial, industrial, construction, transport
-                              // ⚠️ confirm exact value with accountant
+const ICA_PRODUCTOS = 0.749  // % — commercial, industrial, construction, transport
 
 function getICATarifa(ciiu: string): number {
   const s = ciiu.slice(0, 2)
@@ -144,22 +143,34 @@ export function computeRetenciones(rut: RUTData): RetencionRecomendada[] {
   }
 
   // ── ReteICA ──────────────────────────────────────────────────────────────
-  const icaSection  = primaryCIIU?.slice(0, 2) ?? null
-  const isExentoICA = icaSection !== null && parseInt(icaSection) >= 1 && parseInt(icaSection) <= 3
-  const icaTarifa   = primaryCIIU ? getICATarifa(primaryCIIU) : ICA_SERVICIOS
+  const icaSection   = primaryCIIU?.slice(0, 2) ?? null
+  const isExentoICA  = icaSection !== null && parseInt(icaSection) >= 1 && parseInt(icaSection) <= 3
+  const icaTarifa    = primaryCIIU ? getICATarifa(primaryCIIU) : ICA_SERVICIOS
+  const isCartagena  = !rut.ciudad || rut.ciudad.toUpperCase().includes('CARTAGENA')
 
-  results.push({
-    retencion_tipo: 'ReteICA',
-    concepto: isExentoICA
-      ? 'No aplica — actividad agropecuaria'
-      : `Cartagena — CIIU ${primaryCIIU ?? 'no registrado'}`,
-    tarifa_recomendada: isExentoICA ? 0 : icaTarifa,
-    base_minima: isExentoICA ? null : BASE_ICA,
-    aplica: !isExentoICA,
-    notas: isExentoICA
-      ? 'Sector agropecuario exento de ICA en Cartagena.'
-      : `Base mínima $${BASE_ICA.toLocaleString('es-CO')} (25% SMLMV 2026).`,
-  })
+  if (!isCartagena) {
+    results.push({
+      retencion_tipo: 'ReteICA',
+      concepto: `No aplica — proveedor fuera de Cartagena (${rut.ciudad})`,
+      tarifa_recomendada: 0,
+      base_minima: null,
+      aplica: false,
+      notas: 'ReteICA de Cartagena solo aplica a proveedores con actividad en Cartagena.',
+    })
+  } else {
+    results.push({
+      retencion_tipo: 'ReteICA',
+      concepto: isExentoICA
+        ? 'No aplica — actividad agropecuaria'
+        : `Cartagena — CIIU ${primaryCIIU ?? 'no registrado'}`,
+      tarifa_recomendada: isExentoICA ? 0 : icaTarifa,
+      base_minima: isExentoICA ? null : BASE_ICA,
+      aplica: !isExentoICA,
+      notas: isExentoICA
+        ? 'Sector agropecuario exento de ICA en Cartagena.'
+        : `Base mínima $${BASE_ICA.toLocaleString('es-CO')} (25% SMLMV 2026).`,
+    })
+  }
 
   // ── ReteIVA ──────────────────────────────────────────────────────────────
   // HH is NOT gran contribuyente.
