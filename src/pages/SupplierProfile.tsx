@@ -454,12 +454,6 @@ function IdentidadLegalCard({ supplier, loading, supplierId, onUpdate, prefill, 
           .maybeSingle()
         const fullConflict: MergeConflict = { ...c, legal: (cLegal as MergeConflict['legal']) ?? null }
         // Default: prefer 'theirs' when they have data, 'mine' when they don't
-        const draftVals: Record<string, string | null> = {
-          razon_social: draft.razon_social || null, nombre_operativo: draft.nombre_operativo || null,
-          tipo_persona: draft.tipo_persona || null, email: draft.email || null, telefono: draft.telefono || null,
-          codigo_tributario: draft.codigo_tributario, ciiu: draft.ciiu, direccion: draft.direccion,
-          ciudad: draft.ciudad, rep_legal_nombre: draft.rep_legal_nombre, rep_legal_documento: draft.rep_legal_documento,
-        }
         const theirVals: Record<string, string | null> = {
           razon_social: fullConflict.razon_social, nombre_operativo: fullConflict.nombre_operativo,
           tipo_persona: fullConflict.tipo_persona, email: fullConflict.email, telefono: fullConflict.telefono,
