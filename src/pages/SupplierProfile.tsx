@@ -32,9 +32,9 @@ export function SupplierProfile() {
     })()
   }, [id])
 
-  const displayName = supplier
-    ? (supplier.razon_social || supplier.name)
-    : '—'
+  const legal = supplier?.razon_social || supplier?.name || '—'
+  const trading = supplier?.nombre_operativo
+  const displayName = trading && trading !== legal ? `${legal} (${trading})` : legal
 
   return (
     <div>

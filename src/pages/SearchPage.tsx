@@ -76,6 +76,11 @@ function formatCOP(amount: number): string {
   return '$' + Math.round(amount).toLocaleString('es-CO')
 }
 
+function supplierDisplayName(razonSocial: string | null | undefined, nombreOperativo: string | null | undefined, fallback?: string | null): string {
+  const legal = razonSocial || fallback || ''
+  return nombreOperativo && nombreOperativo !== legal ? `${legal} (${nombreOperativo})` : legal
+}
+
 function matchesCompany(r: CppInvoice | TxRow, company: string | null): boolean {
   if (!company) return true
   if (r.empresa?.toUpperCase() === company) return true
@@ -179,9 +184,10 @@ export function SearchPage() {
       const filters = [
         `name.ilike.%${term}%`,
         `razon_social.ilike.%${term}%`,
+        `nombre_operativo.ilike.%${term}%`,
         ...(cleanNit.length > 0 ? [`nit.ilike.%${cleanNit}%`] : []),
       ]
-      const { data } = await suppliersQuery('id, name, razon_social, nit')
+      const { data } = await suppliersQuery('id, name, razon_social, nombre_operativo, nit')
         .or(filters.join(','))
         .limit(8)
       setSuggestions((data as unknown as Supplier[]) ?? [])
@@ -283,11 +289,11 @@ export function SearchPage() {
 
     const { data: suppData } = await supabase
       .from('accounts_suppliers')
-      .select('id, name, razon_social, nit')
+      .select('id, name, razon_social, nombre_operativo, nit')
       .in('nit', top20nits)
 
     const nitToSupplier = new Map(
-      ((suppData ?? []) as { id: string; name: string; razon_social: string | null; nit: string }[])
+      ((suppData ?? []) as { id: string; name: string; razon_social: string | null; nombre_operativo: string | null; nit: string }[])
         .map(s => [s.nit, s])
     )
 
@@ -296,7 +302,7 @@ export function SearchPage() {
       const supplier = nitToSupplier.get(nit)
       return {
         id: supplier?.id ?? '',
-        nombre: supplier ? (supplier.razon_social || supplier.name) : nit,
+        nombre: supplier ? supplierDisplayName(supplier.razon_social, supplier.nombre_operativo, supplier.name) : nit,
         nit,
         gasto: g.total,
         entities: Array.from(g.entityTotals.entries())
@@ -400,7 +406,7 @@ export function SearchPage() {
                 >
                   <span style={{ display: 'flex', alignItems: 'baseline', gap: 10 }}>
                     <span style={{ fontSize: '0.875rem', fontWeight: 400, color: 'var(--hh-dark)', flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                      {s.razon_social ?? s.name}
+                      {supplierDisplayName(s.razon_social, s.nombre_operativo, s.name)}
                     </span>
                     {s.nit && (
                       <span style={{ fontSize: '0.75rem', fontWeight: 300, color: 'var(--hh-haze)', flexShrink: 0 }}>

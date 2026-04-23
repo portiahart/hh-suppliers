@@ -13,7 +13,14 @@ function useDebounce<T>(value: T, delay: number): T {
   return debounced
 }
 
-interface SupplierHit { id: string; name: string | null; razon_social: string | null; nit: string | null }
+interface SupplierHit { id: string; name: string | null; razon_social: string | null; nombre_operativo: string | null; nit: string | null }
+
+function supplierDisplayName(s: SupplierHit): string {
+  const legal = s.razon_social || s.name || ''
+  return s.nombre_operativo && s.nombre_operativo !== legal
+    ? `${legal} (${s.nombre_operativo})`
+    : legal
+}
 
 export function AppLayout() {
   const navigate = useNavigate()
@@ -38,9 +45,10 @@ export function AppLayout() {
       const filters = [
         `name.ilike.%${term}%`,
         `razon_social.ilike.%${term}%`,
+        `nombre_operativo.ilike.%${term}%`,
         ...(cleanNit.length > 0 ? [`nit.ilike.%${cleanNit}%`] : []),
       ]
-      const { data } = await suppliersQuery('id, name, razon_social, nit').or(filters.join(',')).limit(8)
+      const { data } = await suppliersQuery('id, name, razon_social, nombre_operativo, nit').or(filters.join(',')).limit(8)
       setHits((data as unknown as SupplierHit[]) ?? [])
       setShowDrop(true)
       setSearching(false)
@@ -255,7 +263,7 @@ export function AppLayout() {
                     onMouseEnter={e => { e.currentTarget.style.background = 'var(--hh-ice)' }}
                     onMouseLeave={e => { e.currentTarget.style.background = 'transparent' }}
                   >
-                    <span style={{ fontWeight: 400 }}>{h.razon_social ?? h.name}</span>
+                    <span style={{ fontWeight: 400 }}>{supplierDisplayName(h)}</span>
                     {h.nit && (
                       <span style={{ marginLeft: 8, fontSize: '0.75rem', color: 'var(--hh-haze)' }}>
                         {h.nit}
