@@ -8,7 +8,7 @@ import { computeRetenciones } from '../lib/retencionesEngine'
 import type { RetencionRecomendada, RUTData } from '../lib/rutTypes'
 import { CIIU_LABELS, RESPONSABILIDADES_LABELS } from '../lib/rutLookups'
 
-const TABS = ['General', 'Bancario', 'Evaluación', 'B Corp', 'Gasto'] as const
+const TABS = ['General', 'Bancario', 'Evaluación', 'B Corp', 'Gasto', 'Contactos CRM'] as const
 type Tab = typeof TABS[number]
 
 export function SupplierProfile() {
@@ -119,6 +119,8 @@ export function SupplierProfile() {
         <EvaluacionTab supplierId={id ?? null} />
       ) : activeTab === 'Gasto' ? (
         <GastoTab supplierId={id ?? null} nit={supplier?.nit ?? null} />
+      ) : activeTab === 'Contactos CRM' ? (
+        <ContactosCRMTab supplierId={id ?? null} />
       ) : (
         <ComingSoon tab={activeTab} />
       )}
@@ -2898,6 +2900,80 @@ function SkeletonFields() {
           <span style={{ ...shimmer, width: '90%' }} />
         </div>
       ))}
+    </div>
+  )
+}
+
+type CRMContact = {
+  id: string
+  contact_id: string
+  role: string | null
+  is_primary: boolean
+  contacts: {
+    first_name: string | null
+    last_name: string | null
+    email: string | null
+    phone: string | null
+  } | null
+}
+
+function ContactosCRMTab({ supplierId }: { supplierId: string | null }) {
+  const [contacts, setContacts] = useState<CRMContact[]>([])
+  const [loading, setLoading] = useState(true)
+
+  useEffect(() => {
+    if (!supplierId) return
+    void (async () => {
+      const { data, error } = await supabase
+        .from('contact_supplier_links')
+        .select('id, contact_id, role, is_primary, contacts(first_name, last_name, email, phone)')
+        .eq('supplier_id', supplierId)
+        .order('is_primary', { ascending: false })
+      setLoading(false)
+      if (!error && data) setContacts(data as CRMContact[])
+    })()
+  }, [supplierId])
+
+  if (loading) return <div style={{ paddingTop: 48, textAlign: 'center', color: 'var(--hh-haze)', fontSize: '.85rem' }}>Loading…</div>
+
+  if (contacts.length === 0) return (
+    <div style={{ paddingTop: 48, textAlign: 'center' }}>
+      <p style={{ fontFamily: 'var(--font-display)', fontWeight: 300, fontStyle: 'italic', fontSize: '1.1rem', color: 'var(--hh-haze)' }}>
+        No hay contactos CRM vinculados a este proveedor.
+      </p>
+      <p style={{ fontSize: '.78rem', color: 'var(--hh-haze)', marginTop: 8 }}>
+        Los vínculos se crean desde el CRM de Hart Hospitality.
+      </p>
+    </div>
+  )
+
+  return (
+    <div style={{ padding: '24px 0' }}>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+        {contacts.map(link => {
+          const c = link.contacts
+          const name = [c?.first_name, c?.last_name].filter(Boolean).join(' ') || '—'
+          return (
+            <div key={link.id} style={{ background: 'var(--hh-shell)', borderRadius: 10, padding: '14px 18px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
+              <div>
+                <div style={{ fontWeight: 500, fontSize: '.9rem', color: 'var(--hh-ink)', display: 'flex', alignItems: 'center', gap: 8 }}>
+                  {name}
+                  {link.is_primary && (
+                    <span style={{ fontSize: '.6rem', letterSpacing: '.1em', textTransform: 'uppercase', background: 'rgba(74,155,142,.12)', color: 'var(--hh-teal)', padding: '2px 6px', borderRadius: 4 }}>
+                      Primary
+                    </span>
+                  )}
+                </div>
+                {link.role && <div style={{ fontSize: '.75rem', color: 'var(--hh-haze)', marginTop: 2 }}>{link.role}</div>}
+                <div style={{ fontSize: '.75rem', color: 'var(--hh-haze)', marginTop: 4, display: 'flex', gap: 12 }}>
+                  {c?.email && <a href={`mailto:${c.email}`} style={{ color: 'var(--hh-teal)' }}>{c.email}</a>}
+                  {c?.phone && <span>{c.phone}</span>}
+                </div>
+              </div>
+            </div>
+          )
+        })}
+      </div>
     </div>
   )
 }
