@@ -2914,7 +2914,7 @@ type CRMContact = {
     last_name: string | null
     email: string | null
     phone: string | null
-  } | null
+  }[] | null
 }
 
 function ContactosCRMTab({ supplierId }: { supplierId: string | null }) {
@@ -2951,7 +2951,7 @@ function ContactosCRMTab({ supplierId }: { supplierId: string | null }) {
     <div style={{ padding: '24px 0' }}>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
         {contacts.map(link => {
-          const c = link.contacts
+          const c = Array.isArray(link.contacts) ? link.contacts[0] : link.contacts
           const name = [c?.first_name, c?.last_name].filter(Boolean).join(' ') || '—'
           return (
             <div key={link.id} style={{ background: 'var(--hh-shell)', borderRadius: 10, padding: '14px 18px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
