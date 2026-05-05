@@ -487,6 +487,18 @@ function IdentidadLegalCard({ supplier, loading, supplierId, onUpdate, prefill, 
       rep_legal_documento: pick('rep_legal_documento', draft.rep_legal_documento, mergeConflict.legal?.rep_legal_documento ?? null),
       updated_at: new Date().toISOString(),
     }, { onConflict: 'supplier_id' })
+    // Reassign any transactions from the source supplier to the surviving one
+    if (supplierId) {
+      await supabase
+        .from('accounts_transactions')
+        .update({ supplier_id: mergeConflict.id })
+        .eq('supplier_id', supplierId)
+      // Archive the source supplier so it disappears from all lists
+      await supabase
+        .from('accounts_suppliers')
+        .update({ archived_at: new Date().toISOString() })
+        .eq('id', supplierId)
+    }
     setMerging(false)
     setMergeConflict(null)
     navigate(`/suppliers/${mergeConflict.id}`)
