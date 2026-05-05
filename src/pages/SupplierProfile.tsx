@@ -14,17 +14,20 @@ type Tab = typeof TABS[number]
 export function SupplierProfile() {
   const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
+  const { session } = useAuth()
   const [supplier, setSupplier] = useState<Supplier | null>(null)
   const [loading, setLoading] = useState(true)
   const [activeTab, setActiveTab] = useState<Tab>('General')
   const [bankingPrefill, setBankingPrefill] = useState<BankingFields | null>(null)
+  const [isSuperAdmin, setIsSuperAdmin] = useState(false)
+  const [archiving, setArchiving] = useState(false)
 
   useEffect(() => {
     if (!id) return
     void (async () => {
       const { data, error } = await supabase
         .from('accounts_suppliers')
-        .select('id, name, razon_social, nombre_operativo, nit, documento_tipo, tipo_persona, email, telefono, categoria, status, created_at, updated_at')
+        .select('id, razon_social, nombre_operativo, nit, documento_tipo, tipo_persona, email, telefono, categoria, status, archived_at, created_at, updated_at')
         .eq('id', id)
         .single()
       if (!error) setSupplier(data as Supplier)
@@ -32,9 +35,31 @@ export function SupplierProfile() {
     })()
   }, [id])
 
-  const legal = supplier?.razon_social || supplier?.name || '—'
+  useEffect(() => {
+    if (!session?.user?.id) return
+    void (async () => {
+      const { data } = await supabase.from('crm_users').select('is_super_admin').eq('id', session.user.id).single()
+      if (data?.is_super_admin) setIsSuperAdmin(true)
+    })()
+  }, [session])
+
+  const handleArchive = async () => {
+    if (!id || !supplier) return
+    if (!window.confirm(`¿Archivar a ${supplier.razon_social}? No aparecerá en búsquedas ni listas.`)) return
+    setArchiving(true)
+    const archived_at = new Date().toISOString()
+    const { error } = await supabase
+      .from('accounts_suppliers')
+      .update({ archived_at })
+      .eq('id', id)
+    if (!error) setSupplier({ ...supplier, archived_at })
+    setArchiving(false)
+  }
+
+  const legal = supplier?.razon_social || '—'
   const trading = supplier?.nombre_operativo
   const displayName = trading && trading !== legal ? `${legal} (${trading})` : legal
+  const isArchived = !!supplier?.archived_at
 
   return (
     <div>
@@ -63,18 +88,62 @@ export function SupplierProfile() {
       {loading ? (
         <div style={{ height: 36, width: 280, borderRadius: 4, background: 'rgba(122,145,165,0.15)', marginBottom: 28 }} />
       ) : (
-        <h1
-          style={{
-            fontFamily: 'var(--font-display)',
-            fontWeight: 300,
-            fontSize: '1.75rem',
-            color: 'var(--hh-dark)',
-            margin: '0 0 28px',
-            lineHeight: 1.2,
-          }}
-        >
-          {displayName}
-        </h1>
+        <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 16, marginBottom: 28 }}>
+          <h1
+            style={{
+              fontFamily: 'var(--font-display)',
+              fontWeight: 300,
+              fontSize: '1.75rem',
+              color: isArchived ? 'var(--hh-haze)' : 'var(--hh-dark)',
+              margin: 0,
+              lineHeight: 1.2,
+            }}
+          >
+            {displayName}
+          </h1>
+          {isSuperAdmin && !isArchived && (
+            <button
+              onClick={handleArchive}
+              disabled={archiving}
+              style={{
+                fontFamily: 'var(--font-body)',
+                fontSize: '0.75rem',
+                fontWeight: 400,
+                padding: '6px 14px',
+                borderRadius: 4,
+                border: '1px solid rgba(122,145,165,0.4)',
+                background: 'transparent',
+                color: 'var(--hh-haze)',
+                cursor: archiving ? 'default' : 'pointer',
+                whiteSpace: 'nowrap',
+                flexShrink: 0,
+                marginTop: 6,
+                opacity: archiving ? 0.6 : 1,
+              }}
+            >
+              Archivar
+            </button>
+          )}
+        </div>
+      )}
+
+      {/* Archived banner */}
+      {isArchived && !loading && (
+        <div style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: 10,
+          background: 'rgba(122,145,165,0.08)',
+          border: '1px solid rgba(122,145,165,0.25)',
+          borderRadius: 6,
+          padding: '10px 16px',
+          marginBottom: 24,
+          fontFamily: 'var(--font-body)',
+          fontSize: '0.8125rem',
+          color: 'var(--hh-haze)',
+        }}>
+          Este proveedor está archivado y no aparece en búsquedas ni listas.
+        </div>
       )}
 
       {/* Tabs */}

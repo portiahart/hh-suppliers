@@ -13,10 +13,10 @@ function useDebounce<T>(value: T, delay: number): T {
   return debounced
 }
 
-interface SupplierHit { id: string; name: string | null; razon_social: string | null; nombre_operativo: string | null; nit: string | null }
+interface SupplierHit { id: string; razon_social: string | null; nombre_operativo: string | null; nit: string | null }
 
 function supplierDisplayName(s: SupplierHit): string {
-  const legal = s.razon_social || s.name || ''
+  const legal = s.razon_social || ''
   return s.nombre_operativo && s.nombre_operativo !== legal
     ? `${legal} (${s.nombre_operativo})`
     : legal
@@ -43,12 +43,11 @@ export function AppLayout() {
       const term = debouncedQuery.trim()
       const cleanNit = term.replace(/\D/g, '')
       const filters = [
-        `name.ilike.%${term}%`,
         `razon_social.ilike.%${term}%`,
         `nombre_operativo.ilike.%${term}%`,
         ...(cleanNit.length > 0 ? [`nit.ilike.%${cleanNit}%`] : []),
       ]
-      const { data } = await suppliersQuery('id, name, razon_social, nombre_operativo, nit').or(filters.join(',')).limit(8)
+      const { data } = await suppliersQuery('id, razon_social, nombre_operativo, nit').or(filters.join(',')).limit(8)
       setHits((data as unknown as SupplierHit[]) ?? [])
       setShowDrop(true)
       setSearching(false)

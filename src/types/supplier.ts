@@ -2,7 +2,6 @@ export type SupplierStatus = 'ACTIVE' | 'INACTIVE'
 
 export interface Supplier {
   id: string
-  name: string
   razon_social: string | null
   nombre_operativo: string | null
   nit: string | null
@@ -12,6 +11,7 @@ export interface Supplier {
   telefono: string | null
   categoria: string | null
   status: SupplierStatus | null
+  archived_at: string | null
   created_at: string
   updated_at: string
 }

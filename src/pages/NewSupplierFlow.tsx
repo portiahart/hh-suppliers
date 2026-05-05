@@ -31,7 +31,7 @@ export function NewSupplierFlow() {
   const [existingHasRut, setExistingHasRut] = useState<boolean | null>(null)
   const [merging, setMerging] = useState(false)
 
-  const [similarNames, setSimilarNames] = useState<{ id: string; name: string }[]>([])
+  const [similarNames, setSimilarNames] = useState<{ id: string; razon_social: string }[]>([])
 
   const [rutFile, setRutFile] = useState<File | null>(null)
   const [rutTempPath, setRutTempPath] = useState<string | null>(null)
@@ -100,7 +100,7 @@ export function NewSupplierFlow() {
         return n !== normInput && (n.includes(normInput) || normInput.includes(n) || tokenSimilarity(normInput, n) > 0.5)
       })
       .slice(0, 3)
-    setSimilarNames(similar.map(s => ({ id: s.id, name: s.razon_social })))
+    setSimilarNames(similar.map(s => ({ id: s.id, razon_social: s.razon_social })))
   }
 
   const handleCreate = async (e: React.FormEvent) => {
@@ -327,7 +327,7 @@ export function NewSupplierFlow() {
                   </div>
                   {similarNames.map(s => (
                     <div key={s.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', paddingTop: 2 }}>
-                      <span style={{ fontFamily: 'var(--font-body)', fontSize: '0.8125rem', color: 'var(--hh-dark)' }}>{s.name}</span>
+                      <span style={{ fontFamily: 'var(--font-body)', fontSize: '0.8125rem', color: 'var(--hh-dark)' }}>{s.razon_social}</span>
                       <Link to={`/suppliers/${s.id}`} style={{ fontFamily: 'var(--font-body)', fontSize: '0.75rem', color: 'var(--hh-teal)', textDecoration: 'underline', textUnderlineOffset: 2, whiteSpace: 'nowrap', marginLeft: 10 }}>
                         Ver perfil →
                       </Link>

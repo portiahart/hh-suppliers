@@ -247,13 +247,13 @@ Deno.serve(async (req: Request) => {
     )
 
     // Paginate to get all rows (PostgREST max_rows caps single requests at 1000)
-    type DbSupplier = { id: string; name: string; nit: string | null }
+    type DbSupplier = { id: string; razon_social: string; nit: string | null }
     const allSuppliers: DbSupplier[] = []
     const PAGE = 1000
     for (let from = 0; ; from += PAGE) {
       const { data, error } = await supabase
         .from('accounts_suppliers')
-        .select('id, name, nit')
+        .select('id, razon_social, nit')
         .range(from, from + PAGE - 1)
       if (error) throw new Error(`Failed to fetch suppliers (page ${from}): ${error.message}`)
       if (!data || data.length === 0) break
@@ -262,9 +262,9 @@ Deno.serve(async (req: Request) => {
     }
     const dbSuppliers = allSuppliers
 
-    // Key: normName(name) → uuid
+    // Key: normName(razon_social) → uuid
     const supplierMap = new Map<string, string>(
-      dbSuppliers.map(s => [normName(s.name), s.id])
+      dbSuppliers.map(s => [normName(s.razon_social), s.id])
     )
 
     /* ── 4. Build upsert rows ───────────────────────────── */
@@ -327,7 +327,6 @@ Deno.serve(async (req: Request) => {
       if (!supplierId) continue
       const payload: Record<string, unknown> = {
         id: supplierId,
-        name: sheetRow.name,
         razon_social: sheetRow.name,
         documento_tipo: sheetRow.documento_tipo,
         nombre_operativo: sheetRow.nombre_operativo,

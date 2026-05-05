@@ -76,8 +76,8 @@ function formatCOP(amount: number): string {
   return '$' + Math.round(amount).toLocaleString('es-CO')
 }
 
-function supplierDisplayName(razonSocial: string | null | undefined, nombreOperativo: string | null | undefined, fallback?: string | null): string {
-  const legal = razonSocial || fallback || ''
+function supplierDisplayName(razonSocial: string | null | undefined, nombreOperativo: string | null | undefined): string {
+  const legal = razonSocial || ''
   return nombreOperativo && nombreOperativo !== legal ? `${legal} (${nombreOperativo})` : legal
 }
 
@@ -302,7 +302,7 @@ export function SearchPage() {
       const supplier = nitToSupplier.get(nit)
       return {
         id: supplier?.id ?? '',
-        nombre: supplier ? supplierDisplayName(supplier.razon_social, supplier.nombre_operativo, supplier.name) : nit,
+        nombre: supplier ? supplierDisplayName(supplier.razon_social, supplier.nombre_operativo) : nit,
         nit,
         gasto: g.total,
         entities: Array.from(g.entityTotals.entries())
@@ -406,7 +406,7 @@ export function SearchPage() {
                 >
                   <span style={{ display: 'flex', alignItems: 'baseline', gap: 10 }}>
                     <span style={{ fontSize: '0.875rem', fontWeight: 400, color: 'var(--hh-dark)', flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                      {supplierDisplayName(s.razon_social, s.nombre_operativo, s.name)}
+                      {supplierDisplayName(s.razon_social, s.nombre_operativo)}
                     </span>
                     {s.nit && (
                       <span style={{ fontSize: '0.75rem', fontWeight: 300, color: 'var(--hh-haze)', flexShrink: 0 }}>
