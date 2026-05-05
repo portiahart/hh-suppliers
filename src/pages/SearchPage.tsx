@@ -182,12 +182,11 @@ export function SearchPage() {
       const term = debouncedQuery.trim()
       const cleanNit = term.replace(/\D/g, '')
       const filters = [
-        `name.ilike.%${term}%`,
         `razon_social.ilike.%${term}%`,
         `nombre_operativo.ilike.%${term}%`,
         ...(cleanNit.length > 0 ? [`nit.ilike.%${cleanNit}%`] : []),
       ]
-      const { data } = await suppliersQuery('id, name, razon_social, nombre_operativo, nit')
+      const { data } = await suppliersQuery('id, razon_social, nombre_operativo, nit')
         .or(filters.join(','))
         .limit(8)
       setSuggestions((data as unknown as Supplier[]) ?? [])
@@ -289,11 +288,11 @@ export function SearchPage() {
 
     const { data: suppData } = await supabase
       .from('accounts_suppliers')
-      .select('id, name, razon_social, nombre_operativo, nit')
+      .select('id, razon_social, nombre_operativo, nit')
       .in('nit', top20nits)
 
     const nitToSupplier = new Map(
-      ((suppData ?? []) as { id: string; name: string; razon_social: string | null; nombre_operativo: string | null; nit: string }[])
+      ((suppData ?? []) as { id: string; razon_social: string | null; nombre_operativo: string | null; nit: string }[])
         .map(s => [s.nit, s])
     )
 
