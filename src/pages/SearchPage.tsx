@@ -12,6 +12,8 @@ import type { Supplier } from '../types/supplier'
 import { PendingApprovalsModal } from '../components/PendingApprovalsModal'
 import { DuplicatesModal } from '../components/DuplicatesModal'
 import type { DuplicateGroup, DuplicateSupplier } from '../components/DuplicatesModal'
+import { NoNitModal } from '../components/NoNitModal'
+import type { NoNitSupplier } from '../components/NoNitModal'
 import { useAuth } from '../context/AuthContext'
 
 /* ─── Types ──────────────────────────────────────────────── */
@@ -130,10 +132,12 @@ export function SearchPage() {
   const [modalData, setModalData] = useState<{ title: string; rows: CppInvoice[] } | null>(null)
   const [showPendingModal, setShowPendingModal] = useState(false)
 
-  // Duplicates (super admin only)
+  // Duplicates + no-NIT (super admin only)
   const [isSuperAdmin, setIsSuperAdmin] = useState(false)
   const [duplicateGroups, setDuplicateGroups] = useState<DuplicateGroup[]>([])
   const [showDuplicatesModal, setShowDuplicatesModal] = useState(false)
+  const [noNitSuppliers, setNoNitSuppliers] = useState<NoNitSupplier[]>([])
+  const [showNoNitModal, setShowNoNitModal] = useState(false)
 
   // Top 20 results (async)
   const [topSuppliers, setTopSuppliers] = useState<TopSupplierRow[]>([])
@@ -250,6 +254,12 @@ export function SearchPage() {
         if (suppliers.length > 1) groups.push({ key, suppliers })
       }
       setDuplicateGroups(groups)
+
+      // Suppliers with no NIT
+      const noNit = all
+        .filter(s => !s.nit)
+        .sort((a, b) => (a.razon_social ?? '').localeCompare(b.razon_social ?? '', 'es'))
+      setNoNitSuppliers(noNit as NoNitSupplier[])
     })()
   }, [session])
 
@@ -496,6 +506,27 @@ export function SearchPage() {
           </button>
         )}
 
+        {/* No-NIT badge (super admin only) */}
+        {isSuperAdmin && noNitSuppliers.length > 0 && (
+          <button
+            onClick={() => setShowNoNitModal(true)}
+            style={{
+              flexShrink: 0,
+              display: 'flex', alignItems: 'center', gap: 7,
+              fontFamily: 'var(--font-body)', fontSize: '0.8125rem', fontWeight: 500,
+              padding: '0 14px', height: 52,
+              borderRadius: 8, cursor: 'pointer',
+              background: 'rgba(214,158,46,0.1)',
+              border: '1px solid rgba(214,158,46,0.4)',
+              color: '#A07810',
+              whiteSpace: 'nowrap',
+            }}
+          >
+            <ExclamationTriangleIcon width={15} height={15} />
+            {noNitSuppliers.length} sin NIT
+          </button>
+        )}
+
         {/* Company filter */}
         {!cardLoading && availableCompanies.length > 0 && (
           <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
@@ -583,9 +614,17 @@ export function SearchPage() {
         <DuplicatesModal
           groups={duplicateGroups}
           onClose={() => setShowDuplicatesModal(false)}
-          onMerged={(survivorId, absorbedId) => {
+          onMerged={(_survivorId, absorbedId) => {
             setDuplicateGroups(prev => prev.filter(g => !g.suppliers.some(s => s.id === absorbedId)))
           }}
+        />
+      )}
+
+      {/* ── No-NIT modal ──────────────────────────────────── */}
+      {showNoNitModal && (
+        <NoNitModal
+          suppliers={noNitSuppliers}
+          onClose={() => setShowNoNitModal(false)}
         />
       )}
 
