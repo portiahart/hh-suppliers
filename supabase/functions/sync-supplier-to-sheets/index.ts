@@ -191,7 +191,8 @@ async function handleFullSync(token: string): Promise<{ synced: number }> {
     const { data, error } = await supabase
       .from('accounts_suppliers')
       .select('*')
-      .not('name', 'ilike', 'X -%')
+      .not('razon_social', 'ilike', 'X -%')
+      .is('archived_at', null)
       .order('created_at', { ascending: true })
       .range(from, from + PAGE - 1)
     if (error) throw new Error(`Supabase error: ${error.message}`)

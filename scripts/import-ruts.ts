@@ -181,7 +181,7 @@ async function main() {
     // Look up supplier
     const { data: supplier } = await supabase
       .from('accounts_suppliers')
-      .select('id, name')
+      .select('id, razon_social')
       .eq('nit', nit)
       .maybeSingle()
 
@@ -205,7 +205,7 @@ async function main() {
     if (existingDoc?.document_date && item.documentDate) {
       const existingDate = new Date(existingDoc.document_date)
       if (existingDate >= item.documentDate) {
-        console.log(`  ↷  ${prefix}\n     ${supplier.name}: existing RUT dated ${existingDoc.document_date.slice(0, 10)} is same/newer — skipping\n`)
+        console.log(`  ↷  ${prefix}\n     ${supplier.razon_social}: existing RUT dated ${existingDoc.document_date.slice(0, 10)} is same/newer — skipping\n`)
         stats.skipped++
         continue
       }
@@ -216,7 +216,7 @@ async function main() {
     const dateLabel = item.rawDate ? ` (dated ${item.rawDate})` : ''
 
     if (DRY_RUN) {
-      console.log(`  ✓  ${prefix}\n     [DRY RUN] ${action} for ${supplier.name}${dateLabel}\n`)
+      console.log(`  ✓  ${prefix}\n     [DRY RUN] ${action} for ${supplier.razon_social}${dateLabel}\n`)
       isReplacing ? stats.replaced++ : stats.uploaded++
       continue
     }
@@ -251,10 +251,10 @@ async function main() {
       })
       if (insertError) throw new Error(`DB insert failed: ${insertError.message}`)
 
-      console.log(`  ✓  ${prefix}\n     ${action} for ${supplier.name}${dateLabel}\n`)
+      console.log(`  ✓  ${prefix}\n     ${action} for ${supplier.razon_social}${dateLabel}\n`)
       isReplacing ? stats.replaced++ : stats.uploaded++
     } catch (e) {
-      console.log(`  ✗  ${prefix}\n     ${supplier.name}: ${e instanceof Error ? e.message : String(e)}\n`)
+      console.log(`  ✗  ${prefix}\n     ${supplier.razon_social}: ${e instanceof Error ? e.message : String(e)}\n`)
       stats.errors++
     }
   }
