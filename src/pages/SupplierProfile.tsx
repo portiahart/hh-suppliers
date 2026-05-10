@@ -2100,7 +2100,8 @@ function computeScore(answers: Answers): number {
 function parseBool(val: string | null): boolean | null {
   if (!val) return null
   const v = val.trim().toUpperCase()
-  if (v === 'TRUE' || v === 'SI' || v === 'SÍ' || v === '1' || v === 'YES') return true
+  if (v === 'TRUE' || v === 'SI' || v === 'SÍ' || v === '1' || v === 'YES'
+    || v.startsWith('YES ') || v.startsWith('SI ') || v.startsWith('SÍ ')) return true
   if (v === 'FALSE' || v === 'NO' || v === '0') return false
   return null
 }

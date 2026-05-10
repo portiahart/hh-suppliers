@@ -105,7 +105,8 @@ function parseScore(val: string | null): number | null {
 function parseBool(val: string | null): boolean | null {
   if (!val) return null
   const v = val.trim().toUpperCase()
-  if (v === 'TRUE' || v === 'SI' || v === 'SÍ' || v === '1' || v === 'YES') return true
+  if (v === 'TRUE' || v === 'SI' || v === 'SÍ' || v === '1' || v === 'YES'
+    || v.startsWith('YES ') || v.startsWith('SI ') || v.startsWith('SÍ ')) return true
   if (v === 'FALSE' || v === 'NO' || v === '0') return false
   return null
 }
@@ -323,12 +324,21 @@ export function ReportesBICPage() {
 
   const loadSuppliers = async (ids: string[]) => {
     if (ids.length === 0) return
-    const { data } = await supabase
-      .from('accounts_suppliers')
-      .select('id, razon_social, nombre_operativo, nit, bic_survey_score, bic_ubicacion, bic_ciudad, bic_pais, bic_independent, bic_underserved, bic_small_company, bic_minoria')
-      .in('id', ids)
+    const CHUNK = 500
+    const chunks: string[][] = []
+    for (let i = 0; i < ids.length; i += CHUNK) chunks.push(ids.slice(i, i + CHUNK))
+    const results = await Promise.all(
+      chunks.map(chunk =>
+        supabase
+          .from('accounts_suppliers')
+          .select('id, razon_social, nombre_operativo, nit, bic_survey_score, bic_ubicacion, bic_ciudad, bic_pais, bic_independent, bic_underserved, bic_small_company, bic_minoria')
+          .in('id', chunk)
+      )
+    )
     const map = new Map<string, SupplierInfo>()
-    for (const s of (data ?? []) as SupplierInfo[]) map.set(s.id, s)
+    for (const { data } of results) {
+      for (const s of (data ?? []) as SupplierInfo[]) map.set(s.id, s)
+    }
     setSuppliers(map)
   }
 
