@@ -319,9 +319,6 @@ export function ReportesBICPage() {
   const [suppliers, setSuppliers]   = useState<Map<string, SupplierInfo>>(new Map())
   const [activeGroup, setActiveGroup] = useState<GroupKey>('BPM')
   const [activeYear, setActiveYear]   = useState<number | null>(null)
-  const [syncing, setSyncing]         = useState(false)
-  const [syncMsg, setSyncMsg]         = useState<string | null>(null)
-
   const loadSuppliers = async (ids: string[]) => {
     if (ids.length === 0) return
     const CHUNK = 500
@@ -355,23 +352,6 @@ export function ReportesBICPage() {
       }
     })()
   }, [])
-
-  const runSync = async () => {
-    setSyncing(true)
-    setSyncMsg(null)
-    try {
-      const { data, error } = await supabase.functions.invoke('sync-bic-data')
-      if (error) throw new Error(error.message)
-      if (!data?.success) throw new Error(data?.error ?? 'Sync falló')
-      setSyncMsg(`Sincronizado: ${data.updated ?? '?'} proveedores actualizados.`)
-      // Reload supplier BIC data
-      await loadSuppliers([...new Set(spendRows.map(r => r.supplier_id))])
-    } catch (err) {
-      setSyncMsg(`Error: ${err instanceof Error ? err.message : 'desconocido'}`)
-    } finally {
-      setSyncing(false)
-    }
-  }
 
   const yearDataList = useMemo<YearData[]>(() => {
     const group = GROUPS.find(g => g.key === activeGroup)
@@ -458,26 +438,7 @@ export function ReportesBICPage() {
         <h1 style={{ fontFamily: 'var(--font-display)', fontWeight: 300, fontSize: '1.75rem', color: 'var(--hh-dark)', margin: 0 }}>
           Reportes BIC
         </h1>
-        <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 10 }}>
-          {syncMsg && (
-            <span style={{ fontSize: '0.8rem', color: syncMsg.startsWith('Error') ? '#B9484E' : 'var(--hh-teal)' }}>
-              {syncMsg}
-            </span>
-          )}
-          <button
-            onClick={runSync}
-            disabled={syncing}
-            style={{
-              padding: '7px 16px', borderRadius: 8, border: '1px solid rgba(122,145,165,0.3)',
-              background: syncing ? 'rgba(122,145,165,0.08)' : 'white',
-              cursor: syncing ? 'not-allowed' : 'pointer',
-              fontFamily: 'var(--font-body)', fontSize: '0.8125rem', color: 'var(--hh-dark)',
-              opacity: syncing ? 0.7 : 1,
-            }}
-          >
-            {syncing ? 'Sincronizando…' : '↻ Sincronizar datos BIC'}
-          </button>
-        </div>
+        <div style={{ marginLeft: 'auto' }} />
       </div>
 
       {/* Entity tabs */}

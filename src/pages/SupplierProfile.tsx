@@ -2225,7 +2225,7 @@ function BicSheetSection({ supplier }: { supplier: Supplier | null }) {
   if (!supplier) return null
 
   const bic: BicFields = supplier
-  const hasBicData = !!bic.bic_synced_at
+  const hasBicData = !!(bic.bic_survey_score || bic.bic_ubicacion || bic.bic_ciudad || bic.bic_pais || bic.bic_independent || bic.bic_underserved || bic.bic_small_company || bic.bic_minoria)
 
   const score = parseSurveyScore(bic.bic_survey_score)
   const scorePass = score !== null && score >= 60
@@ -2240,14 +2240,14 @@ function BicSheetSection({ supplier }: { supplier: Supplier | null }) {
       action={
         fmtSync ? (
           <span style={{ fontSize: '0.75rem', color: 'var(--hh-haze)', fontWeight: 300 }}>
-            Sincronizado {fmtSync}
+            Actualizado {fmtSync}
           </span>
         ) : undefined
       }
     >
       {!hasBicData ? (
         <p style={{ color: 'var(--hh-haze)', fontSize: '0.875rem', margin: 0 }}>
-          Sin datos del sheet. Usa <strong>Reportes BIC → Sincronizar datos BIC</strong> para importar.
+          Sin datos BIC disponibles para este proveedor.
         </p>
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
