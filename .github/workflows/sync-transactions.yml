@@ -11,6 +11,9 @@ on:
 jobs:
   sync:
     runs-on: ubuntu-latest
+    concurrency:
+      group: sync-transactions-cache
+      cancel-in-progress: false
     steps:
       - name: Invoke sync-transactions-cache
         run: |
