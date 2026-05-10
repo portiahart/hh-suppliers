@@ -264,6 +264,51 @@ function BoolCard({ label, b, color, csvPrefix }: { label: string; b: BoolBucket
   )
 }
 
+function BigSpendersCard({ rows, year, color, textColor, csvPrefix }: {
+  rows: SupplierRow[]; year: number; color: string; textColor: string; csvPrefix: string
+}) {
+  const [open, setOpen] = useState(false)
+  return (
+    <div style={{ background: 'white', borderRadius: 12, border: '1px solid rgba(122,145,165,0.15)', overflow: 'hidden' }}>
+      <button
+        onClick={() => setOpen(o => !o)}
+        style={{
+          display: 'flex', alignItems: 'center', width: '100%', padding: '14px 20px',
+          background: 'none', border: 'none', cursor: 'pointer', gap: 10, textAlign: 'left',
+        }}
+      >
+        <span style={{ fontSize: '0.65rem', fontWeight: 600, color: 'var(--hh-haze)', textTransform: 'uppercase', letterSpacing: '0.07em', flex: 1 }}>
+          Proveedores &gt; $12M · {year}
+        </span>
+        {rows.length > 0 && (
+          <span style={{ background: color, color: textColor, borderRadius: 10, padding: '1px 8px', fontSize: '0.65rem', fontWeight: 500 }}>
+            {rows.length}
+          </span>
+        )}
+        <span style={{ color: 'var(--hh-haze)', fontSize: '0.7rem', marginLeft: 4 }}>{open ? '▲' : '▼'}</span>
+      </button>
+      {open && (
+        <div style={{ padding: '0 20px 16px' }}>
+          {rows.length === 0
+            ? <p style={{ color: 'var(--hh-haze)', fontSize: '0.875rem', margin: 0 }}>Ningún proveedor superó $12M.</p>
+            : (
+              <>
+                <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 8 }}>
+                  <ExportBtn onClick={() => downloadCSV(`${csvPrefix}-12M.csv`,
+                    ['Proveedor', 'NIT', 'Gasto'],
+                    rows.map(r => [r.name, r.nit, Math.round(r.total)])
+                  )} />
+                </div>
+                <SupplierList rows={rows} showScore={false} />
+              </>
+            )
+          }
+        </div>
+      )}
+    </div>
+  )
+}
+
 /* ─── Page ───────────────────────────────────────────────────────────────── */
 
 export function ReportesBICPage() {
@@ -485,30 +530,8 @@ export function ReportesBICPage() {
                 </div>
               </Card>
 
-              {/* >12M */}
-              <Card>
-                <div style={{ display: 'flex', alignItems: 'center', marginBottom: 12 }}>
-                  <span style={SH}>
-                    Proveedores &gt; $12M · {yd.year}
-                    {yd.bigSpenders.length > 0 && (
-                      <span style={{ marginLeft: 8, background: currentGroup.color, color: currentGroup.textColor, borderRadius: 10, padding: '1px 8px', fontSize: '0.65rem' }}>
-                        {yd.bigSpenders.length}
-                      </span>
-                    )}
-                  </span>
-                  {yd.bigSpenders.length > 0 && (
-                    <span style={{ marginLeft: 'auto' }}>
-                      <ExportBtn onClick={() => downloadCSV(`${csvPrefix}-12M.csv`,
-                        ['Proveedor', 'NIT', 'Gasto'],
-                        yd.bigSpenders.map(r => [r.name, r.nit, Math.round(r.total)])
-                      )} />
-                    </span>
-                  )}
-                </div>
-                {yd.bigSpenders.length === 0
-                  ? <p style={{ color: 'var(--hh-haze)', fontSize: '0.875rem', margin: 0 }}>Ningún proveedor superó $12M.</p>
-                  : <SupplierList rows={yd.bigSpenders} showScore={false} />}
-              </Card>
+              {/* >12M — collapsible */}
+              <BigSpendersCard rows={yd.bigSpenders} year={yd.year} color={currentGroup.color} textColor={currentGroup.textColor} csvPrefix={csvPrefix} />
 
               {/* Assessment */}
               <Card>
