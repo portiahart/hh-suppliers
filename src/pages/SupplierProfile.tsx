@@ -2690,8 +2690,8 @@ function GastoTab({ supplierId, nit }: { supplierId: string | null; nit: string 
     if (!nit) { setTxLoading(false); return }
     void (async () => {
       const [{ data: txData }, { data: cppData }] = await Promise.all([
-        supabase.from('transactions_cache').select('*').eq('nit', nit).order('fecha_operacion', { ascending: false }),
-        supabase.from('cuentas_por_pagar_cache').select('*').eq('nit', nit).order('fecha_operacion', { ascending: false }),
+        supabase.from('transactions_cache').select('*').eq('nit', nit).order('fecha_operacion', { ascending: false }).limit(10000),
+        supabase.from('cuentas_por_pagar_cache').select('*').eq('nit', nit).order('fecha_operacion', { ascending: false }).limit(10000),
       ])
       setTxns((txData as TxRow[]) ?? [])
       const cppRows = (cppData as CppRow[]) ?? []
