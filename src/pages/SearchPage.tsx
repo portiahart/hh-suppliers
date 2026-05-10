@@ -10,11 +10,6 @@ import {
 import { supabase, suppliersQuery } from '../lib/supabase'
 import type { Supplier } from '../types/supplier'
 import { PendingApprovalsModal } from '../components/PendingApprovalsModal'
-import { DuplicatesModal } from '../components/DuplicatesModal'
-import type { DuplicateGroup, DuplicateSupplier } from '../components/DuplicatesModal'
-import { NoNitModal } from '../components/NoNitModal'
-import type { NoNitSupplier } from '../components/NoNitModal'
-import { useAuth } from '../context/AuthContext'
 
 /* ─── Types ──────────────────────────────────────────────── */
 
@@ -105,7 +100,6 @@ function allocatedAmount(r: CppInvoice | TxRow, company: string | null): number 
 
 export function SearchPage() {
   const navigate = useNavigate()
-  const { session } = useAuth()
 
   // Typeahead state
   const [query, setQuery] = useState('')
@@ -131,13 +125,6 @@ export function SearchPage() {
   // Modal
   const [modalData, setModalData] = useState<{ title: string; rows: CppInvoice[] } | null>(null)
   const [showPendingModal, setShowPendingModal] = useState(false)
-
-  // Duplicates + no-NIT (super admin only)
-  const [isSuperAdmin, setIsSuperAdmin] = useState(false)
-  const [duplicateGroups, setDuplicateGroups] = useState<DuplicateGroup[]>([])
-  const [showDuplicatesModal, setShowDuplicatesModal] = useState(false)
-  const [noNitSuppliers, setNoNitSuppliers] = useState<NoNitSupplier[]>([])
-  const [showNoNitModal, setShowNoNitModal] = useState(false)
 
   // Top 20 results (async)
   const [topSuppliers, setTopSuppliers] = useState<TopSupplierRow[]>([])
@@ -218,50 +205,6 @@ export function SearchPage() {
     document.addEventListener('mousedown', handler)
     return () => document.removeEventListener('mousedown', handler)
   }, [])
-
-  /* ── Super admin check + duplicate detection ─────────────── */
-  useEffect(() => {
-    if (!session?.user?.id) return
-    void (async () => {
-      const { data } = await supabase.from('crm_users').select('is_super_admin').eq('id', session.user.id).single()
-      if (!data?.is_super_admin) return
-      setIsSuperAdmin(true)
-
-      // Fetch all non-archived suppliers and find duplicate razon_social groups
-      const all: DuplicateSupplier[] = []
-      let from = 0
-      while (true) {
-        const { data: page } = await supabase
-          .from('accounts_suppliers')
-          .select('id, razon_social, nombre_operativo, nit, status, created_at')
-          .is('archived_at', null)
-          .range(from, from + 999)
-        if (!page || page.length === 0) break
-        all.push(...(page as DuplicateSupplier[]))
-        if (page.length < 1000) break
-        from += 1000
-      }
-
-      const seen = new Map<string, DuplicateSupplier[]>()
-      for (const s of all) {
-        const key = (s.razon_social ?? '').trim().toLowerCase().replace(/\s+/g, ' ')
-        if (!key) continue
-        if (!seen.has(key)) seen.set(key, [])
-        seen.get(key)!.push(s)
-      }
-      const groups: DuplicateGroup[] = []
-      for (const [key, suppliers] of seen) {
-        if (suppliers.length > 1) groups.push({ key, suppliers })
-      }
-      setDuplicateGroups(groups)
-
-      // Suppliers with no NIT
-      const noNit = all
-        .filter(s => !s.nit)
-        .sort((a, b) => (a.razon_social ?? '').localeCompare(b.razon_social ?? '', 'es'))
-      setNoNitSuppliers(noNit as NoNitSupplier[])
-    })()
-  }, [session])
 
   /* ── Fetch CPP rows — stored raw; cards derived via useMemo ── */
   const fetchCards = useCallback(async () => {
@@ -485,48 +428,6 @@ export function SearchPage() {
           )}
         </div>
 
-        {/* Duplicates badge (super admin only) */}
-        {isSuperAdmin && duplicateGroups.length > 0 && (
-          <button
-            onClick={() => setShowDuplicatesModal(true)}
-            style={{
-              flexShrink: 0,
-              display: 'flex', alignItems: 'center', gap: 7,
-              fontFamily: 'var(--font-body)', fontSize: '0.8125rem', fontWeight: 500,
-              padding: '0 14px', height: 52,
-              borderRadius: 8, cursor: 'pointer',
-              background: 'rgba(214,158,46,0.1)',
-              border: '1px solid rgba(214,158,46,0.4)',
-              color: '#A07810',
-              whiteSpace: 'nowrap',
-            }}
-          >
-            <ExclamationTriangleIcon width={15} height={15} />
-            {duplicateGroups.length} {duplicateGroups.length === 1 ? 'duplicado' : 'duplicados'}
-          </button>
-        )}
-
-        {/* No-NIT badge (super admin only) */}
-        {isSuperAdmin && noNitSuppliers.length > 0 && (
-          <button
-            onClick={() => setShowNoNitModal(true)}
-            style={{
-              flexShrink: 0,
-              display: 'flex', alignItems: 'center', gap: 7,
-              fontFamily: 'var(--font-body)', fontSize: '0.8125rem', fontWeight: 500,
-              padding: '0 14px', height: 52,
-              borderRadius: 8, cursor: 'pointer',
-              background: 'rgba(214,158,46,0.1)',
-              border: '1px solid rgba(214,158,46,0.4)',
-              color: '#A07810',
-              whiteSpace: 'nowrap',
-            }}
-          >
-            <ExclamationTriangleIcon width={15} height={15} />
-            {noNitSuppliers.length} sin NIT
-          </button>
-        )}
-
         {/* Company filter */}
         {!cardLoading && availableCompanies.length > 0 && (
           <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
@@ -609,24 +510,6 @@ export function SearchPage() {
         />
       )}
 
-      {/* ── Duplicates modal ─────────────────────────────── */}
-      {showDuplicatesModal && (
-        <DuplicatesModal
-          groups={duplicateGroups}
-          onClose={() => setShowDuplicatesModal(false)}
-          onMerged={(_survivorId, absorbedId) => {
-            setDuplicateGroups(prev => prev.filter(g => !g.suppliers.some(s => s.id === absorbedId)))
-          }}
-        />
-      )}
-
-      {/* ── No-NIT modal ──────────────────────────────────── */}
-      {showNoNitModal && (
-        <NoNitModal
-          suppliers={noNitSuppliers}
-          onClose={() => setShowNoNitModal(false)}
-        />
-      )}
 
       {/* ── Pending approvals modal ──────────────────────── */}
       {showPendingModal && (

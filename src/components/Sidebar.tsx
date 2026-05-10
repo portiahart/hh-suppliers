@@ -21,6 +21,7 @@ export function Sidebar({ isMobile = false, isOpen = false, onClose }: SidebarPr
         top: 0,
         left: 0,
         zIndex: 10,
+        overflowY: 'auto',
         transform: isMobile && !isOpen ? 'translateX(-220px)' : 'translateX(0)',
         transition: 'transform 0.25s ease',
       }}
@@ -33,7 +34,6 @@ export function Sidebar({ isMobile = false, isOpen = false, onClose }: SidebarPr
           rel="noopener noreferrer"
           style={{ display: 'flex', alignItems: 'center', flex: 1 }}
         >
-          {/* White logo — sidebar has dark background */}
           <img
             src="https://dqfrqjsbfmwtclkclmvc.supabase.co/storage/v1/object/public/brand/HH_white.png"
             alt="Hart Hospitality Group"
@@ -60,6 +60,28 @@ export function Sidebar({ isMobile = false, isOpen = false, onClose }: SidebarPr
         <NavItem to="/" icon={<PersonIcon width={20} height={20} />} label="Proveedores" onClick={onClose} />
         <NavItem to="/new" icon={<PlusCircledIcon width={20} height={20} />} label="Nuevo Proveedor" onClick={onClose} />
         <NavItem to="/reportes-bic" icon={<BarChartIcon width={20} height={20} />} label="Reportes BIC" onClick={onClose} />
+
+        {/* Divider */}
+        <div style={{ height: 1, background: 'rgba(122,145,165,0.15)', margin: '12px 24px' }} />
+
+        {/* Incompletos section */}
+        <p style={{
+          fontFamily: 'var(--font-body)',
+          fontSize: '0.625rem',
+          fontWeight: 600,
+          letterSpacing: '0.14em',
+          textTransform: 'uppercase',
+          color: 'rgba(122,145,165,0.6)',
+          margin: '0 0 4px',
+          padding: '0 24px',
+        }}>
+          Incompletos
+        </p>
+        <SubNavItem to="/incompletos/duplicado"    label="Duplicado"         onClick={onClose} />
+        <SubNavItem to="/incompletos/tipo-persona" label="Tipo de persona"   onClick={onClose} />
+        <SubNavItem to="/incompletos/razon-social" label="Razón Social"      onClick={onClose} />
+        <SubNavItem to="/incompletos/nit"          label="NIT / CC"          onClick={onClose} />
+        <SubNavItem to="/incompletos/rut"          label="RUT presente o no" onClick={onClose} />
       </nav>
     </aside>
   )
@@ -94,6 +116,29 @@ function NavItem({ to, icon, label, onClick }: NavItemProps) {
       })}
     >
       <span style={{ flexShrink: 0 }}>{icon}</span>
+      {label}
+    </NavLink>
+  )
+}
+
+function SubNavItem({ to, label, onClick }: { to: string; label: string; onClick?: () => void }) {
+  return (
+    <NavLink
+      to={to}
+      onClick={onClick}
+      style={({ isActive }) => ({
+        display: 'block',
+        padding: '7px 24px 7px 32px',
+        textDecoration: 'none',
+        color: isActive ? 'var(--hh-teal)' : 'rgba(122,145,165,0.75)',
+        fontFamily: 'var(--font-body)',
+        fontWeight: 400,
+        fontSize: '0.8125rem',
+        background: isActive ? 'rgba(74,155,142,0.08)' : 'transparent',
+        borderLeft: isActive ? '2px solid var(--hh-teal)' : '2px solid transparent',
+        transition: 'color 0.15s ease',
+      })}
+    >
       {label}
     </NavLink>
   )
