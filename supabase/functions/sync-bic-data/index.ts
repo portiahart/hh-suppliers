@@ -191,10 +191,17 @@ Deno.serve(async (req: Request) => {
 
     for (const rec of records) {
       const { nit, ...payload } = rec
+
+      // Colombian NITs: Supabase may store NIT+DV (e.g. "9003462901") while the
+      // sheet stores NIT without DV (e.g. "900346290"). Match both formats.
+      const nitFilters = [`nit.eq.${nit}`]
+      if (nit.length === 9) nitFilters.push(`nit.like.${nit}_`)        // match NIT+anyDV stored in DB
+      if (nit.length === 10) nitFilters.push(`nit.eq.${nit.slice(0, 9)}`) // match NIT-without-DV stored in DB
+
       const { data: matchData, error: matchErr } = await supabase
         .from('accounts_suppliers')
         .update(payload)
-        .eq('nit', nit)
+        .or(nitFilters.join(','))
         .select('id')
 
       if (matchErr) {
