@@ -24,4 +24,6 @@ export interface Supplier {
   bic_small_company: string | null
   bic_minoria: string | null
   bic_synced_at: string | null
+  // Payment specifics — imported once from DATABASEOLD col N, managed in-app thereafter
+  pago_inmediato: boolean | null
 }

@@ -27,7 +27,7 @@ export function SupplierProfile() {
     void (async () => {
       const { data, error } = await supabase
         .from('accounts_suppliers')
-        .select('id, razon_social, nombre_operativo, nit, documento_tipo, tipo_persona, email, telefono, categoria, status, archived_at, created_at, updated_at, bic_survey_score, bic_ubicacion, bic_categoria, bic_physical_goods, bic_independent, bic_underserved, bic_small_company, bic_minoria, bic_synced_at')
+        .select('id, razon_social, nombre_operativo, nit, documento_tipo, tipo_persona, email, telefono, categoria, status, archived_at, created_at, updated_at, bic_survey_score, bic_ubicacion, bic_categoria, bic_physical_goods, bic_independent, bic_underserved, bic_small_company, bic_minoria, bic_synced_at, pago_inmediato')
         .eq('id', id)
         .single()
       if (!error) setSupplier(data as Supplier)
@@ -795,6 +795,75 @@ function IdentidadLegalCard({ supplier, loading, supplierId, onUpdate, prefill, 
   )
 }
 
+/* ─── Especificidad de Pago Card ─────────────────────────── */
+
+function EspecificidadPagoCard({ supplier, loading, supplierId, onUpdate }: {
+  supplier: Supplier | null
+  loading: boolean
+  supplierId: string | null
+  onUpdate: (s: Supplier) => void
+}) {
+  const [saving, setSaving] = useState(false)
+  const [toast, setToast] = useState<string | null>(null)
+  const showToast = (msg: string) => { setToast(msg); setTimeout(() => setToast(null), 3500) }
+
+  const handleToggle = async () => {
+    if (!supplierId || !supplier || saving) return
+    const next = !(supplier.pago_inmediato ?? false)
+    setSaving(true)
+    const { data, error } = await supabase
+      .from('accounts_suppliers')
+      .update({ pago_inmediato: next, updated_at: new Date().toISOString() })
+      .eq('id', supplierId)
+      .select()
+      .single()
+    if (error) {
+      showToast(`Error al guardar: ${error.message}`)
+    } else {
+      onUpdate(data as Supplier)
+    }
+    setSaving(false)
+  }
+
+  const checked = supplier?.pago_inmediato ?? false
+
+  return (
+    <>
+      {toast && (
+        <div style={{
+          position: 'fixed', bottom: 28, right: 28,
+          background: 'var(--hh-dark)', color: 'var(--hh-ice)',
+          fontFamily: 'var(--font-body)', fontSize: '0.8125rem',
+          padding: '12px 20px', borderRadius: 6, zIndex: 100,
+          boxShadow: '0 4px 16px rgba(0,0,0,0.15)',
+        }}>{toast}</div>
+      )}
+      <SectionCard title="Especificidad de Pago">
+        {loading ? (
+          <SkeletonFields />
+        ) : (
+          <label style={{
+            display: 'inline-flex', alignItems: 'center', gap: 10,
+            cursor: saving ? 'default' : 'pointer',
+            opacity: saving ? 0.6 : 1,
+            fontFamily: 'var(--font-body)', fontSize: '0.875rem',
+            fontWeight: 300, color: 'var(--hh-dark)',
+          }}>
+            <input
+              type="checkbox"
+              checked={checked}
+              onChange={() => void handleToggle()}
+              disabled={saving}
+              style={{ width: 16, height: 16, cursor: saving ? 'default' : 'pointer', accentColor: 'var(--hh-teal)' }}
+            />
+            Inmediato
+          </label>
+        )}
+      </SectionCard>
+    </>
+  )
+}
+
 /* ─── General Tab (Resumen + Legal + Documentos) ─────────── */
 
 function GeneralTab({ supplier, loading, onUpdate, supplierId, onExtractBanking }: ResumenTabProps & { supplierId: string | null; onExtractBanking?: (f: BankingFields) => void }) {
@@ -823,6 +892,12 @@ function GeneralTab({ supplier, loading, onUpdate, supplierId, onExtractBanking 
           onUpdate={onUpdate}
           prefill={prefill}
           onPrefillConsumed={clearPrefill}
+        />
+        <EspecificidadPagoCard
+          supplier={supplier}
+          loading={loading}
+          supplierId={supplierId}
+          onUpdate={onUpdate}
         />
         <TributoriaCard key={analysisKey} supplierId={supplierId} onAnalyzed={onRUTAnalyzed} showToast={showToast} />
         <RetencionesCard key={`ret-${analysisKey}`} supplierId={supplierId} showToast={showToast} />
