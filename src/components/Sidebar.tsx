@@ -1,5 +1,5 @@
 import { Link, NavLink } from 'react-router-dom'
-import { PersonIcon, PlusCircledIcon, HomeIcon } from '@radix-ui/react-icons'
+import { PersonIcon, PlusCircledIcon, HomeIcon, BarChartIcon } from '@radix-ui/react-icons'
 
 interface SidebarProps {
   isMobile?: boolean
@@ -59,6 +59,7 @@ export function Sidebar({ isMobile = false, isOpen = false, onClose }: SidebarPr
       <nav style={{ flex: 1, padding: '16px 0' }}>
         <NavItem to="/" icon={<PersonIcon width={20} height={20} />} label="Proveedores" onClick={onClose} />
         <NavItem to="/new" icon={<PlusCircledIcon width={20} height={20} />} label="Nuevo Proveedor" onClick={onClose} />
+        <NavItem to="/reportes-bic" icon={<BarChartIcon width={20} height={20} />} label="Reportes BIC" onClick={onClose} />
       </nav>
     </aside>
   )

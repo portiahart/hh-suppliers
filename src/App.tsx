@@ -7,6 +7,7 @@ import { SearchPage } from './pages/SearchPage'
 import { SupplierProfile } from './pages/SupplierProfile'
 import { NewSupplierFlow } from './pages/NewSupplierFlow'
 import { SettingsPage } from './pages/SettingsPage'
+import { ReportesBICPage } from './pages/ReportesBICPage'
 
 export default function App() {
   return (
@@ -25,6 +26,7 @@ export default function App() {
             <Route path="/suppliers/:id" element={<SupplierProfile />} />
             <Route path="/new" element={<NewSupplierFlow />} />
             <Route path="/settings" element={<SettingsPage />} />
+            <Route path="/reportes-bic" element={<ReportesBICPage />} />
           </Route>
         </Routes>
       </BrowserRouter>

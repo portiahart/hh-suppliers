@@ -27,7 +27,7 @@ export function SupplierProfile() {
     void (async () => {
       const { data, error } = await supabase
         .from('accounts_suppliers')
-        .select('id, razon_social, nombre_operativo, nit, documento_tipo, tipo_persona, email, telefono, categoria, status, archived_at, created_at, updated_at')
+        .select('id, razon_social, nombre_operativo, nit, documento_tipo, tipo_persona, email, telefono, categoria, status, archived_at, created_at, updated_at, bic_survey_score, bic_ubicacion, bic_categoria, bic_physical_goods, bic_independent, bic_underserved, bic_small_company, bic_minoria, bic_synced_at')
         .eq('id', id)
         .single()
       if (!error) setSupplier(data as Supplier)
@@ -185,7 +185,7 @@ export function SupplierProfile() {
       ) : activeTab === 'Bancario' ? (
         <BancarioTab supplierId={id ?? null} prefill={bankingPrefill} onPrefillConsumed={() => setBankingPrefill(null)} />
       ) : activeTab === 'Evaluación' ? (
-        <EvaluacionTab supplierId={id ?? null} />
+        <EvaluacionTab supplierId={id ?? null} supplier={supplier} />
       ) : activeTab === 'Gasto' ? (
         <GastoTab supplierId={id ?? null} nit={supplier?.nit ?? null} />
       ) : activeTab === 'Contactos CRM' ? (
@@ -2094,7 +2094,216 @@ function computeScore(answers: Answers): number {
   }, 0)
 }
 
-function EvaluacionTab({ supplierId }: { supplierId: string | null }) {
+/* ─── BIC sheet data helpers ──────────────────────────────── */
+
+// Normalise truthy/falsy values coming from the sheet (TRUE/SI/1/Sí → true)
+function parseBool(val: string | null): boolean | null {
+  if (!val) return null
+  const v = val.trim().toUpperCase()
+  if (v === 'TRUE' || v === 'SI' || v === 'SÍ' || v === '1' || v === 'YES') return true
+  if (v === 'FALSE' || v === 'NO' || v === '0') return false
+  return null
+}
+
+// Parse survey score to a 0–100 number regardless of format (78, "78%", 0.78)
+function parseSurveyScore(val: string | null): number | null {
+  if (!val) return null
+  const s = val.trim().replace('%', '')
+  const n = parseFloat(s)
+  if (isNaN(n)) return null
+  // Decimal fraction → percentage
+  return n > 0 && n <= 1 ? Math.round(n * 100) : Math.round(n)
+}
+
+function BoolChip({ label, value }: { label: string; value: boolean | null }) {
+  const pass = value === true
+  const fail = value === false
+  return (
+    <div style={{
+      display: 'flex', flexDirection: 'column', gap: 4,
+      padding: '10px 14px', borderRadius: 8,
+      border: `1px solid ${pass ? 'rgba(74,155,142,0.25)' : fail ? 'rgba(185,72,78,0.2)' : 'rgba(122,145,165,0.2)'}`,
+      background: pass ? 'rgba(74,155,142,0.06)' : fail ? 'rgba(185,72,78,0.04)' : 'transparent',
+      minWidth: 130,
+    }}>
+      <span style={{ fontSize: '0.65rem', color: 'var(--hh-haze)', textTransform: 'uppercase', letterSpacing: '0.05em', fontWeight: 500 }}>
+        {label}
+      </span>
+      <span style={{
+        fontSize: '0.8125rem', fontWeight: 500,
+        color: pass ? 'var(--hh-teal)' : fail ? '#B9484E' : 'var(--hh-haze)',
+      }}>
+        {value === null ? '—' : pass ? 'Sí' : 'No'}
+      </span>
+    </div>
+  )
+}
+
+type BicFields = Pick<Supplier,
+  'bic_survey_score' | 'bic_ubicacion' | 'bic_categoria' |
+  'bic_physical_goods' | 'bic_independent' | 'bic_underserved' |
+  'bic_small_company' | 'bic_minoria' | 'bic_synced_at'
+>
+
+function BicSheetSection({ supplier }: { supplier: Supplier | null }) {
+  const [syncing, setSyncing] = useState(false)
+  const [syncError, setSyncError] = useState<string | null>(null)
+  const [localBic, setLocalBic] = useState<BicFields | null>(null)
+
+  if (!supplier) return null
+
+  const bic: BicFields = localBic ?? supplier
+  const hasBicData = !!bic.bic_synced_at
+
+  const score = parseSurveyScore(bic.bic_survey_score)
+  const scorePass = score !== null && score >= 60
+
+  const fmtSync = bic.bic_synced_at
+    ? new Date(bic.bic_synced_at).toLocaleDateString('es-CO', { day: 'numeric', month: 'long', year: 'numeric' })
+    : null
+
+  const runSync = async () => {
+    setSyncing(true)
+    setSyncError(null)
+    try {
+      const { data, error } = await supabase.functions.invoke('sync-bic-data')
+      if (error) throw new Error(error.message)
+      if (!data?.success) throw new Error(data?.error ?? 'Sync failed')
+
+      // Re-fetch just this supplier's bic fields so display updates immediately
+      const { data: fresh, error: fetchErr } = await supabase
+        .from('accounts_suppliers')
+        .select('bic_survey_score, bic_ubicacion, bic_categoria, bic_physical_goods, bic_independent, bic_underserved, bic_small_company, bic_minoria, bic_synced_at')
+        .eq('id', supplier.id)
+        .single()
+      if (!fetchErr && fresh) setLocalBic(fresh as BicFields)
+    } catch (err) {
+      setSyncError(err instanceof Error ? err.message : 'Error desconocido')
+    } finally {
+      setSyncing(false)
+    }
+  }
+
+  const syncBtn = (
+    <button
+      onClick={runSync}
+      disabled={syncing}
+      style={{
+        ...ghostBtnStyle,
+        opacity: syncing ? 0.6 : 1,
+        cursor: syncing ? 'not-allowed' : 'pointer',
+      }}
+    >
+      {syncing ? 'Sincronizando…' : hasBicData ? 'Re-sincronizar' : 'Importar del sheet'}
+    </button>
+  )
+
+  return (
+    <SectionCard
+      title="BIC — Base de Datos"
+      action={
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+          {fmtSync && (
+            <span style={{ fontSize: '0.75rem', color: 'var(--hh-haze)', fontWeight: 300 }}>
+              Sincronizado {fmtSync}
+            </span>
+          )}
+          {syncBtn}
+        </div>
+      }
+    >
+      {syncError && (
+        <p style={{ color: '#B9484E', fontSize: '0.8125rem', margin: '0 0 16px' }}>{syncError}</p>
+      )}
+      {!hasBicData ? (
+        <p style={{ color: 'var(--hh-haze)', fontSize: '0.875rem', margin: 0 }}>
+          Sin datos del sheet. Usa el botón para importar.
+        </p>
+      ) : (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+
+          {/* Score + text fields row */}
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12, alignItems: 'flex-start' }}>
+
+            {/* Survey score */}
+            <div style={{
+              display: 'flex', flexDirection: 'column', gap: 4,
+              padding: '10px 16px', borderRadius: 8,
+              border: `1px solid ${scorePass ? 'rgba(74,155,142,0.3)' : score !== null ? 'rgba(185,72,78,0.25)' : 'rgba(122,145,165,0.2)'}`,
+              background: scorePass ? 'rgba(74,155,142,0.07)' : score !== null ? 'rgba(185,72,78,0.05)' : 'transparent',
+            }}>
+              <span style={{ fontSize: '0.65rem', color: 'var(--hh-haze)', textTransform: 'uppercase', letterSpacing: '0.05em', fontWeight: 500 }}>
+                Puntaje BIC
+              </span>
+              <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
+                <span style={{
+                  fontFamily: 'var(--font-numeric)', fontSize: '1.75rem', fontWeight: 500, lineHeight: 1,
+                  color: scorePass ? 'var(--hh-teal)' : score !== null ? '#B9484E' : 'var(--hh-haze)',
+                }}>
+                  {score !== null ? `${score}%` : bic.bic_survey_score ?? '—'}
+                </span>
+                {score !== null && (
+                  <span style={{
+                    fontSize: '0.7rem', fontWeight: 500,
+                    padding: '2px 8px', borderRadius: 99,
+                    background: scorePass ? 'rgba(74,155,142,0.12)' : 'rgba(185,72,78,0.1)',
+                    color: scorePass ? 'var(--hh-teal)' : '#B9484E',
+                  }}>
+                    {scorePass ? 'Aprobado' : 'No aprobado'}
+                  </span>
+                )}
+              </div>
+            </div>
+
+            {/* Ubicacion */}
+            {bic.bic_ubicacion && (
+              <div style={{
+                display: 'flex', flexDirection: 'column', gap: 4,
+                padding: '10px 14px', borderRadius: 8,
+                border: '1px solid rgba(122,145,165,0.2)',
+              }}>
+                <span style={{ fontSize: '0.65rem', color: 'var(--hh-haze)', textTransform: 'uppercase', letterSpacing: '0.05em', fontWeight: 500 }}>
+                  Ubicación
+                </span>
+                <span style={{ fontSize: '0.875rem', color: 'var(--hh-dark)' }}>
+                  {bic.bic_ubicacion}
+                </span>
+              </div>
+            )}
+
+            {/* Categoria */}
+            {bic.bic_categoria && (
+              <div style={{
+                display: 'flex', flexDirection: 'column', gap: 4,
+                padding: '10px 14px', borderRadius: 8,
+                border: '1px solid rgba(122,145,165,0.2)',
+              }}>
+                <span style={{ fontSize: '0.65rem', color: 'var(--hh-haze)', textTransform: 'uppercase', letterSpacing: '0.05em', fontWeight: 500 }}>
+                  Categoría
+                </span>
+                <span style={{ fontSize: '0.875rem', color: 'var(--hh-dark)' }}>
+                  {bic.bic_categoria}
+                </span>
+              </div>
+            )}
+          </div>
+
+          {/* Boolean flags row */}
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10 }}>
+            <BoolChip label="Bienes físicos"          value={parseBool(bic.bic_physical_goods)} />
+            <BoolChip label="Proveedor independiente"  value={parseBool(bic.bic_independent)} />
+            <BoolChip label="En desventaja"            value={parseBool(bic.bic_underserved)} />
+            <BoolChip label="Menos de 50 empleados"   value={parseBool(bic.bic_small_company)} />
+            <BoolChip label="Empresa minoría"          value={parseBool(bic.bic_minoria)} />
+          </div>
+
+        </div>
+      )}
+    </SectionCard>
+  )
+}
+
+function EvaluacionTab({ supplierId, supplier }: { supplierId: string | null; supplier: Supplier | null }) {
   const { session } = useAuth()
   const [row, setRow] = useState<AssessmentRow | null>(null)
   const [loading, setLoading] = useState(true)
@@ -2181,6 +2390,10 @@ function EvaluacionTab({ supplierId }: { supplierId: string | null }) {
           {toast}
         </div>
       )}
+
+      <BicSheetSection supplier={supplier} />
+
+      <div style={{ marginTop: 24 }} />
 
       <SectionCard
         title="Happy Supplier Test"
