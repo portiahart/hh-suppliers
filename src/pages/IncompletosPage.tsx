@@ -72,14 +72,22 @@ export function IncompletosPage() {
   }
 
   async function loadSimple(column: string, mustBeNull: boolean) {
-    const q = supabase
-      .from('accounts_suppliers')
-      .select('id, razon_social, nombre_operativo, nit, tipo_persona, status, created_at')
-      .is('archived_at', null)
-      .order('razon_social', { ascending: true })
-
-    const { data } = mustBeNull ? await q.is(column, null) : await q.not(column, 'is', null)
-    setSuppliers((data as IncompleteSupplier[]) ?? [])
+    const all: IncompleteSupplier[] = []
+    let from = 0
+    while (true) {
+      const q = supabase
+        .from('accounts_suppliers')
+        .select('id, razon_social, nombre_operativo, nit, tipo_persona, status, created_at')
+        .is('archived_at', null)
+        .order('razon_social', { ascending: true })
+        .range(from, from + 999)
+      const { data: page } = mustBeNull ? await q.is(column, null) : await q.not(column, 'is', null)
+      if (!page || page.length === 0) break
+      all.push(...(page as IncompleteSupplier[]))
+      if (page.length < 1000) break
+      from += 1000
+    }
+    setSuppliers(all)
   }
 
   async function loadDuplicates() {
