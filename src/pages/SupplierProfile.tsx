@@ -2146,13 +2146,9 @@ type BicFields = Pick<Supplier,
 >
 
 function BicSheetSection({ supplier }: { supplier: Supplier | null }) {
-  const [syncing, setSyncing] = useState(false)
-  const [syncError, setSyncError] = useState<string | null>(null)
-  const [localBic, setLocalBic] = useState<BicFields | null>(null)
-
   if (!supplier) return null
 
-  const bic: BicFields = localBic ?? supplier
+  const bic: BicFields = supplier
   const hasBicData = !!bic.bic_synced_at
 
   const score = parseSurveyScore(bic.bic_survey_score)
@@ -2162,62 +2158,20 @@ function BicSheetSection({ supplier }: { supplier: Supplier | null }) {
     ? new Date(bic.bic_synced_at).toLocaleDateString('es-CO', { day: 'numeric', month: 'long', year: 'numeric' })
     : null
 
-  const runSync = async () => {
-    setSyncing(true)
-    setSyncError(null)
-    try {
-      const { data, error } = await supabase.functions.invoke('sync-bic-data')
-      if (error) throw new Error(error.message)
-      if (!data?.success) throw new Error(data?.error ?? 'Sync failed')
-
-      // Re-fetch just this supplier's bic fields so display updates immediately
-      const { data: fresh, error: fetchErr } = await supabase
-        .from('accounts_suppliers')
-        .select('bic_survey_score, bic_ubicacion, bic_categoria, bic_physical_goods, bic_independent, bic_underserved, bic_small_company, bic_minoria, bic_synced_at')
-        .eq('id', supplier.id)
-        .single()
-      if (!fetchErr && fresh) setLocalBic(fresh as BicFields)
-    } catch (err) {
-      setSyncError(err instanceof Error ? err.message : 'Error desconocido')
-    } finally {
-      setSyncing(false)
-    }
-  }
-
-  const syncBtn = (
-    <button
-      onClick={runSync}
-      disabled={syncing}
-      style={{
-        ...ghostBtnStyle,
-        opacity: syncing ? 0.6 : 1,
-        cursor: syncing ? 'not-allowed' : 'pointer',
-      }}
-    >
-      {syncing ? 'Sincronizando…' : hasBicData ? 'Re-sincronizar' : 'Importar del sheet'}
-    </button>
-  )
-
   return (
     <SectionCard
       title="BIC — Base de Datos"
       action={
-        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-          {fmtSync && (
-            <span style={{ fontSize: '0.75rem', color: 'var(--hh-haze)', fontWeight: 300 }}>
-              Sincronizado {fmtSync}
-            </span>
-          )}
-          {syncBtn}
-        </div>
+        fmtSync ? (
+          <span style={{ fontSize: '0.75rem', color: 'var(--hh-haze)', fontWeight: 300 }}>
+            Sincronizado {fmtSync}
+          </span>
+        ) : undefined
       }
     >
-      {syncError && (
-        <p style={{ color: '#B9484E', fontSize: '0.8125rem', margin: '0 0 16px' }}>{syncError}</p>
-      )}
       {!hasBicData ? (
         <p style={{ color: 'var(--hh-haze)', fontSize: '0.875rem', margin: 0 }}>
-          Sin datos del sheet. Usa el botón para importar.
+          Sin datos del sheet. Usa <strong>Reportes BIC → Sincronizar datos BIC</strong> para importar.
         </p>
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>

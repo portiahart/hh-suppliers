@@ -1,4 +1,5 @@
 import { useState, useEffect, useMemo } from 'react'
+import { Link } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 
 /* ─── Entity groups ──────────────────────────────────────────────────────── */
@@ -10,6 +11,31 @@ const GROUPS = [
   { key: 'MA',  label: 'Manzana Azul', codes: ['PM', 'MA', 'HH', 'AB', 'AW', 'CR'], color: '#2D6A9F',         textColor: '#fff' },
 ] as const
 type GroupKey = typeof GROUPS[number]['key']
+
+/* ─── CSV export ─────────────────────────────────────────────────────────── */
+
+function downloadCSV(filename: string, headers: string[], rows: (string | number | null)[][]) {
+  const esc = (v: string | number | null) => `"${String(v ?? '').replace(/"/g, '""')}"`
+  const lines = [headers, ...rows].map(r => r.map(esc).join(','))
+  const blob = new Blob(['﻿' + lines.join('\n')], { type: 'text/csv;charset=utf-8;' })
+  const url = URL.createObjectURL(blob)
+  const a = Object.assign(document.createElement('a'), { href: url, download: filename })
+  a.click()
+  URL.revokeObjectURL(url)
+}
+
+function ExportBtn({ onClick, title = 'Descargar Excel' }: { onClick: () => void; title?: string }) {
+  return (
+    <button onClick={onClick} title={title} style={{
+      display: 'inline-flex', alignItems: 'center', gap: 4,
+      padding: '3px 10px', borderRadius: 6, border: '1px solid rgba(122,145,165,0.25)',
+      background: 'transparent', cursor: 'pointer', color: 'var(--hh-haze)',
+      fontFamily: 'var(--font-body)', fontSize: '0.7rem', fontWeight: 400,
+    }}>
+      ↓ xlsx
+    </button>
+  )
+}
 
 /* ─── Formatting ─────────────────────────────────────────────────────────── */
 
@@ -45,8 +71,8 @@ interface SupplierRow {
   name: string
   nit: string | null
   total: number
-  score: number | null        // parsed 0-100 or null
-  location: string            // categorised bucket
+  score: number | null
+  location: string
   independent: boolean | null
   underserved: boolean | null
   smallCompany: boolean | null
@@ -89,21 +115,15 @@ const LOC_LABELS = ['Isla', 'Cartagena', 'Bolívar', 'Colombia', 'América Latin
 function categorizeLocation(ubicacion: string | null, ciudad: string | null, pais: string | null): string {
   const raw = (ubicacion || ciudad || '').toLowerCase()
   const country = (pais || '').toLowerCase()
-
   if (!raw && !country) return 'Sin datos'
-
   if (/isla|bar[uú]|tierra.?bomb|mucura|tintip[aá]n|rosario/.test(raw)) return 'Isla'
   if (raw.includes('cartagena')) return 'Cartagena'
   if (/bol[ií]var|turbaco|mompox|mahates|arjona|san juan nepomuceno/.test(raw)) return 'Bolívar'
-
   const colCities = /bogot|medell|cali\b|barranquilla|bucaramanga|santa.?marta|pereira|armenia|manizales|c[uú]cuta|ibagu[eé]|villavicencio|pasto|monter[ií]a|valledupar|sincelejo|riohacha|neiva|popay[aá]n|tunja|colombia/
   if (colCities.test(raw) || (country.includes('colombia') && !raw)) return 'Colombia'
-
   const latam = /m[eé]xico|per[uú]|chile|argentin|brasil|brazil|ecuador|venezuel|bolivi[ae]|paraguay|uruguay|pana[mh][aá]|costa.?rica|guatemala|honduras|nicaragua|salvador|cuba|dominican|ha[ií]t[ií]|latina|latinoam/
   if (latam.test(raw) || latam.test(country)) return 'América Latina'
-
   if (country && !country.includes('colombia')) return 'Exterior'
-
   return 'Sin datos'
 }
 
@@ -139,45 +159,7 @@ async function fetchAllSpend(): Promise<SpendRow[]> {
   return out
 }
 
-/* ─── Stat helpers ───────────────────────────────────────────────────────── */
-
-function BoolCard({ label, b, color }: { label: string; b: BoolBucket; color: string }) {
-  const yesSpend = sumSpend(b.yes)
-  const noSpend  = sumSpend(b.no)
-  return (
-    <div style={{
-      background: 'white', borderRadius: 10,
-      border: '1px solid rgba(122,145,165,0.15)',
-      padding: '14px 18px', flex: '1 1 200px',
-    }}>
-      <div style={{ fontSize: '0.65rem', color: 'var(--hh-haze)', textTransform: 'uppercase', letterSpacing: '0.06em', fontWeight: 500, marginBottom: 10 }}>
-        {label}
-      </div>
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-        {([['Sí', b.yes, yesSpend], ['No', b.no, noSpend]] as [string, SupplierRow[], number][]).map(([lbl, rows, spend]) => (
-          <div key={lbl} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <span style={{
-              minWidth: 22, fontSize: '0.75rem', fontWeight: 600,
-              color: lbl === 'Sí' ? color : 'var(--hh-haze)',
-            }}>{lbl}</span>
-            <span style={{ fontFamily: 'var(--font-numeric)', fontWeight: 500, fontSize: '0.9rem', color: 'var(--hh-dark)' }}>
-              {rows.length}
-            </span>
-            <span style={{ fontSize: '0.75rem', color: 'var(--hh-haze)' }}>prov.</span>
-            <span style={{ marginLeft: 'auto', fontFamily: 'var(--font-numeric)', fontSize: '0.8rem', color: 'var(--hh-dark)' }}>
-              {fmt(spend)}
-            </span>
-          </div>
-        ))}
-        {b.unknown.length > 0 && (
-          <div style={{ fontSize: '0.75rem', color: 'var(--hh-haze)', marginTop: 2 }}>
-            {b.unknown.length} sin dato
-          </div>
-        )}
-      </div>
-    </div>
-  )
-}
+/* ─── Sub-components ─────────────────────────────────────────────────────── */
 
 function SupplierList({ rows, showScore }: { rows: SupplierRow[]; showScore: boolean }) {
   return (
@@ -185,9 +167,18 @@ function SupplierList({ rows, showScore }: { rows: SupplierRow[]; showScore: boo
       <tbody>
         {rows.map(r => (
           <tr key={r.supplier_id} style={{ borderBottom: '1px solid rgba(122,145,165,0.07)' }}>
-            <td style={{ padding: '7px 0', fontSize: '0.8125rem', color: 'var(--hh-dark)' }}>{r.name}</td>
+            <td style={{ padding: '7px 0', fontSize: '0.8125rem' }}>
+              <Link
+                to={`/suppliers/${r.supplier_id}`}
+                style={{ color: 'var(--hh-dark)', textDecoration: 'none', fontWeight: 400 }}
+                onMouseEnter={e => { (e.currentTarget as HTMLElement).style.color = 'var(--hh-teal)' }}
+                onMouseLeave={e => { (e.currentTarget as HTMLElement).style.color = 'var(--hh-dark)' }}
+              >
+                {r.name}
+              </Link>
+            </td>
             {showScore && (
-              <td style={{ padding: '7px 8px', fontSize: '0.8rem', color: r.score !== null && r.score >= 60 ? 'var(--hh-teal)' : '#B9484E', fontFamily: 'var(--font-numeric)', whiteSpace: 'nowrap' }}>
+              <td style={{ padding: '7px 8px', fontSize: '0.8rem', whiteSpace: 'nowrap', fontFamily: 'var(--font-numeric)', color: r.score !== null && r.score >= 60 ? 'var(--hh-teal)' : '#B9484E' }}>
                 {r.score !== null ? `${r.score}%` : ''}
               </td>
             )}
@@ -202,59 +193,106 @@ function SupplierList({ rows, showScore }: { rows: SupplierRow[]; showScore: boo
 }
 
 function AssessmentGroup({
-  label, rows, color, showScore, defaultOpen,
-}: { label: string; rows: SupplierRow[]; color: string; showScore: boolean; defaultOpen?: boolean }) {
+  label, rows, color, showScore, defaultOpen, csvPrefix,
+}: { label: string; rows: SupplierRow[]; color: string; showScore: boolean; defaultOpen?: boolean; csvPrefix: string }) {
   const [open, setOpen] = useState(defaultOpen ?? false)
   const spend = sumSpend(rows)
+
+  const exportRows = () => {
+    const headers = showScore ? ['Proveedor', 'NIT', 'Puntaje', 'Gasto'] : ['Proveedor', 'NIT', 'Gasto']
+    const data = rows.map(r => showScore
+      ? [r.name, r.nit, r.score !== null ? `${r.score}%` : '', Math.round(r.total)]
+      : [r.name, r.nit, Math.round(r.total)])
+    downloadCSV(`${csvPrefix}-${label.replace(/[^a-zA-Z0-9]/g, '_')}.csv`, headers, data)
+  }
+
   return (
     <div style={{ borderBottom: '1px solid rgba(122,145,165,0.1)', paddingBottom: open ? 12 : 0 }}>
-      <button
-        onClick={() => setOpen(o => !o)}
-        style={{
-          display: 'flex', alignItems: 'center', width: '100%',
-          padding: '12px 0', background: 'none', border: 'none', cursor: 'pointer', gap: 10,
-        }}
-      >
-        <span style={{ fontSize: '0.8125rem', fontWeight: 500, color, flex: 1, textAlign: 'left' }}>{label}</span>
-        <span style={{ fontFamily: 'var(--font-numeric)', fontSize: '0.8125rem', color: 'var(--hh-dark)' }}>
-          {rows.length} prov.
-        </span>
-        <span style={{ fontFamily: 'var(--font-numeric)', fontSize: '0.8125rem', color: 'var(--hh-haze)', minWidth: 100, textAlign: 'right' }}>
-          {fmt(spend)}
-        </span>
-        <span style={{ color: 'var(--hh-haze)', fontSize: '0.75rem', marginLeft: 8 }}>{open ? '▲' : '▼'}</span>
-      </button>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+        <button
+          onClick={() => setOpen(o => !o)}
+          style={{ display: 'flex', alignItems: 'center', flex: 1, padding: '12px 0', background: 'none', border: 'none', cursor: 'pointer', gap: 10 }}
+        >
+          <span style={{ fontSize: '0.8125rem', fontWeight: 500, color, flex: 1, textAlign: 'left' }}>{label}</span>
+          <span style={{ fontFamily: 'var(--font-numeric)', fontSize: '0.8125rem', color: 'var(--hh-dark)' }}>{rows.length} prov.</span>
+          <span style={{ fontFamily: 'var(--font-numeric)', fontSize: '0.8125rem', color: 'var(--hh-haze)', minWidth: 100, textAlign: 'right' }}>{fmt(spend)}</span>
+          <span style={{ color: 'var(--hh-haze)', fontSize: '0.7rem', marginLeft: 4 }}>{open ? '▲' : '▼'}</span>
+        </button>
+        {rows.length > 0 && <ExportBtn onClick={exportRows} />}
+      </div>
       {open && rows.length > 0 && <SupplierList rows={rows} showScore={showScore} />}
     </div>
   )
 }
 
-/* ─── Main page ──────────────────────────────────────────────────────────── */
+function BoolCard({ label, b, color, csvPrefix }: { label: string; b: BoolBucket; color: string; csvPrefix: string }) {
+  const yesSpend = sumSpend(b.yes)
+  const noSpend  = sumSpend(b.no)
+
+  const exportBool = () => {
+    const headers = ['Proveedor', 'NIT', 'Gasto', label]
+    const rows = [
+      ...b.yes.map(r => [r.name, r.nit, Math.round(r.total), 'Sí']),
+      ...b.no.map(r => [r.name, r.nit, Math.round(r.total), 'No']),
+      ...b.unknown.map(r => [r.name, r.nit, Math.round(r.total), '']),
+    ]
+    downloadCSV(`${csvPrefix}-${label.replace(/[^a-zA-Z0-9]/g, '_')}.csv`, headers, rows)
+  }
+
+  return (
+    <div style={{ background: 'white', borderRadius: 10, border: '1px solid rgba(122,145,165,0.15)', padding: '14px 18px', flex: '1 1 200px' }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
+        <span style={{ fontSize: '0.65rem', color: 'var(--hh-haze)', textTransform: 'uppercase', letterSpacing: '0.06em', fontWeight: 500 }}>
+          {label}
+        </span>
+        <ExportBtn onClick={exportBool} />
+      </div>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+        {([['Sí', b.yes, yesSpend], ['No', b.no, noSpend]] as [string, SupplierRow[], number][]).map(([lbl, rows, spend]) => (
+          <div key={lbl} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <span style={{ minWidth: 22, fontSize: '0.75rem', fontWeight: 600, color: lbl === 'Sí' ? color : 'var(--hh-haze)' }}>{lbl}</span>
+            <span style={{ fontFamily: 'var(--font-numeric)', fontWeight: 500, fontSize: '0.9rem', color: 'var(--hh-dark)' }}>{rows.length}</span>
+            <span style={{ fontSize: '0.75rem', color: 'var(--hh-haze)' }}>prov.</span>
+            <span style={{ marginLeft: 'auto', fontFamily: 'var(--font-numeric)', fontSize: '0.8rem', color: 'var(--hh-dark)' }}>{fmt(spend)}</span>
+          </div>
+        ))}
+        {b.unknown.length > 0 && (
+          <div style={{ fontSize: '0.75rem', color: 'var(--hh-haze)', marginTop: 2 }}>{b.unknown.length} sin dato</div>
+        )}
+      </div>
+    </div>
+  )
+}
+
+/* ─── Page ───────────────────────────────────────────────────────────────── */
 
 export function ReportesBICPage() {
-  const [loading, setLoading]     = useState(true)
+  const [loading, setLoading]       = useState(true)
   const [fetchError, setFetchError] = useState<string | null>(null)
-  const [spendRows, setSpendRows] = useState<SpendRow[]>([])
-  const [suppliers, setSuppliers] = useState<Map<string, SupplierInfo>>(new Map())
+  const [spendRows, setSpendRows]   = useState<SpendRow[]>([])
+  const [suppliers, setSuppliers]   = useState<Map<string, SupplierInfo>>(new Map())
   const [activeGroup, setActiveGroup] = useState<GroupKey>('BPM')
   const [activeYear, setActiveYear]   = useState<number | null>(null)
+  const [syncing, setSyncing]         = useState(false)
+  const [syncMsg, setSyncMsg]         = useState<string | null>(null)
+
+  const loadSuppliers = async (ids: string[]) => {
+    if (ids.length === 0) return
+    const { data } = await supabase
+      .from('accounts_suppliers')
+      .select('id, razon_social, nombre_operativo, nit, bic_survey_score, bic_ubicacion, bic_ciudad, bic_pais, bic_independent, bic_underserved, bic_small_company, bic_minoria')
+      .in('id', ids)
+    const map = new Map<string, SupplierInfo>()
+    for (const s of (data ?? []) as SupplierInfo[]) map.set(s.id, s)
+    setSuppliers(map)
+  }
 
   useEffect(() => {
     void (async () => {
       try {
         const rows = await fetchAllSpend()
         setSpendRows(rows)
-
-        const ids = [...new Set(rows.map(r => r.supplier_id))]
-        if (ids.length > 0) {
-          const { data: suppData } = await supabase
-            .from('accounts_suppliers')
-            .select('id, razon_social, nombre_operativo, nit, bic_survey_score, bic_ubicacion, bic_ciudad, bic_pais, bic_independent, bic_underserved, bic_small_company, bic_minoria')
-            .in('id', ids)
-          const map = new Map<string, SupplierInfo>()
-          for (const s of (suppData ?? []) as SupplierInfo[]) map.set(s.id, s)
-          setSuppliers(map)
-        }
+        await loadSuppliers([...new Set(rows.map(r => r.supplier_id))])
       } catch (err) {
         setFetchError(err instanceof Error ? err.message : 'Error')
       } finally {
@@ -263,13 +301,27 @@ export function ReportesBICPage() {
     })()
   }, [])
 
+  const runSync = async () => {
+    setSyncing(true)
+    setSyncMsg(null)
+    try {
+      const { data, error } = await supabase.functions.invoke('sync-bic-data')
+      if (error) throw new Error(error.message)
+      if (!data?.success) throw new Error(data?.error ?? 'Sync falló')
+      setSyncMsg(`Sincronizado: ${data.updated ?? '?'} proveedores actualizados.`)
+      // Reload supplier BIC data
+      await loadSuppliers([...new Set(spendRows.map(r => r.supplier_id))])
+    } catch (err) {
+      setSyncMsg(`Error: ${err instanceof Error ? err.message : 'desconocido'}`)
+    } finally {
+      setSyncing(false)
+    }
+  }
+
   const yearDataList = useMemo<YearData[]>(() => {
     const group = GROUPS.find(g => g.key === activeGroup)
     if (!group) return []
-
     const codeSet = new Set(group.codes)
-
-    // supplier_id → year → total + raw name
     const totals  = new Map<string, Map<number, number>>()
     const rawNames = new Map<string, string>()
 
@@ -285,19 +337,17 @@ export function ReportesBICPage() {
 
     const yearSet = new Set<number>()
     for (const ym of totals.values()) for (const y of ym.keys()) yearSet.add(y)
-    const years = [...yearSet].sort((a, b) => b - a)
 
-    return years.map(year => {
+    return [...yearSet].sort((a, b) => b - a).map(year => {
       const all: SupplierRow[] = []
-
       for (const [sid, ym] of totals) {
         const total = ym.get(year) ?? 0
         if (total <= 0) continue
         const s = suppliers.get(sid)
         all.push({
           supplier_id: sid,
-          name:  s?.nombre_operativo || s?.razon_social || rawNames.get(sid) || sid,
-          nit:   s?.nit ?? null,
+          name: s?.nombre_operativo || s?.razon_social || rawNames.get(sid) || sid,
+          nit: s?.nit ?? null,
           total,
           score: parseScore(s?.bic_survey_score ?? null),
           location: categorizeLocation(s?.bic_ubicacion ?? null, s?.bic_ciudad ?? null, s?.bic_pais ?? null),
@@ -307,24 +357,18 @@ export function ReportesBICPage() {
           minoria: parseBool(s?.bic_minoria ?? null),
         })
       }
-
       all.sort((a, b) => b.total - a.total)
-
-      const passed = all.filter(r => r.score !== null && r.score >= 60).sort((a, b) => (b.score ?? 0) - (a.score ?? 0))
-      const failed = all.filter(r => r.score !== null && r.score < 60).sort((a, b) => (b.score ?? 0) - (a.score ?? 0))
-      const none   = all.filter(r => r.score === null)
-
-      const byLocation = LOC_LABELS.map(label => ({
-        label,
-        rows: all.filter(r => r.location === label),
-      })).filter(b => b.rows.length > 0)
 
       return {
         year,
         all,
         bigSpenders: all.filter(r => r.total >= 12_000_000),
-        assessed: { passed, failed, none },
-        byLocation,
+        assessed: {
+          passed: all.filter(r => r.score !== null && r.score >= 60).sort((a, b) => (b.score ?? 0) - (a.score ?? 0)),
+          failed: all.filter(r => r.score !== null && r.score < 60).sort((a, b) => (b.score ?? 0) - (a.score ?? 0)),
+          none:   all.filter(r => r.score === null),
+        },
+        byLocation: LOC_LABELS.map(label => ({ label, rows: all.filter(r => r.location === label) })).filter(b => b.rows.length > 0),
         independent: boolBucket(all, 'independent'),
         underserved: boolBucket(all, 'underserved'),
         smallCompany: boolBucket(all, 'smallCompany'),
@@ -339,27 +383,47 @@ export function ReportesBICPage() {
 
   const currentGroup = GROUPS.find(g => g.key === activeGroup)!
   const yd = yearDataList.find(y => y.year === activeYear)
+  const csvPrefix = `BIC-${currentGroup.label}-${activeYear}`
 
   const SH: React.CSSProperties = {
     fontSize: '0.65rem', fontWeight: 600, color: 'var(--hh-haze)',
-    textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: 12,
+    textTransform: 'uppercase', letterSpacing: '0.07em',
   }
 
   const Card = ({ children, style }: { children: React.ReactNode; style?: React.CSSProperties }) => (
-    <div style={{
-      background: 'white', borderRadius: 12,
-      border: '1px solid rgba(122,145,165,0.15)',
-      padding: '16px 20px', ...style,
-    }}>
+    <div style={{ background: 'white', borderRadius: 12, border: '1px solid rgba(122,145,165,0.15)', padding: '16px 20px', ...style }}>
       {children}
     </div>
   )
 
   return (
     <div>
-      <h1 style={{ fontFamily: 'var(--font-display)', fontWeight: 300, fontSize: '1.75rem', color: 'var(--hh-dark)', marginBottom: 28 }}>
-        Reportes BIC
-      </h1>
+      {/* Header */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 16, marginBottom: 28, flexWrap: 'wrap' }}>
+        <h1 style={{ fontFamily: 'var(--font-display)', fontWeight: 300, fontSize: '1.75rem', color: 'var(--hh-dark)', margin: 0 }}>
+          Reportes BIC
+        </h1>
+        <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 10 }}>
+          {syncMsg && (
+            <span style={{ fontSize: '0.8rem', color: syncMsg.startsWith('Error') ? '#B9484E' : 'var(--hh-teal)' }}>
+              {syncMsg}
+            </span>
+          )}
+          <button
+            onClick={runSync}
+            disabled={syncing}
+            style={{
+              padding: '7px 16px', borderRadius: 8, border: '1px solid rgba(122,145,165,0.3)',
+              background: syncing ? 'rgba(122,145,165,0.08)' : 'white',
+              cursor: syncing ? 'not-allowed' : 'pointer',
+              fontFamily: 'var(--font-body)', fontSize: '0.8125rem', color: 'var(--hh-dark)',
+              opacity: syncing ? 0.7 : 1,
+            }}
+          >
+            {syncing ? 'Sincronizando…' : '↻ Sincronizar datos BIC'}
+          </button>
+        </div>
+      </div>
 
       {/* Entity tabs */}
       <div style={{ display: 'flex', gap: 8, marginBottom: 28, flexWrap: 'wrap' }}>
@@ -376,7 +440,6 @@ export function ReportesBICPage() {
 
       {loading && <div style={{ color: 'var(--hh-haze)', fontSize: '0.875rem' }}>Cargando datos…</div>}
       {fetchError && <div style={{ color: '#B94848' }}>{fetchError}</div>}
-
       {!loading && !fetchError && yearDataList.length === 0 && (
         <div style={{ color: 'var(--hh-haze)', fontSize: '0.875rem' }}>Sin datos para {currentGroup.label}.</div>
       )}
@@ -386,16 +449,15 @@ export function ReportesBICPage() {
 
           {/* Year sidebar */}
           <div style={{ minWidth: 72, background: 'white', borderRadius: 12, border: '1px solid rgba(122,145,165,0.15)', overflow: 'hidden', flexShrink: 0 }}>
-            {yearDataList.map((yd, i) => (
-              <button key={yd.year} onClick={() => setActiveYear(yd.year)} style={{
+            {yearDataList.map((y, i) => (
+              <button key={y.year} onClick={() => setActiveYear(y.year)} style={{
                 display: 'block', width: '100%', padding: '10px 16px', border: 'none',
                 borderBottom: i < yearDataList.length - 1 ? '1px solid rgba(122,145,165,0.1)' : 'none',
-                background: activeYear === yd.year ? currentGroup.color : 'transparent',
-                color: activeYear === yd.year ? currentGroup.textColor : 'var(--hh-dark)',
+                background: activeYear === y.year ? currentGroup.color : 'transparent',
+                color: activeYear === y.year ? currentGroup.textColor : 'var(--hh-dark)',
                 cursor: 'pointer', fontFamily: 'var(--font-body)', fontSize: '0.875rem',
-                fontWeight: activeYear === yd.year ? 500 : 300, textAlign: 'left',
-                transition: 'all 0.15s ease',
-              }}>{yd.year}</button>
+                fontWeight: activeYear === y.year ? 500 : 300, textAlign: 'left', transition: 'all 0.15s ease',
+              }}>{y.year}</button>
             ))}
           </div>
 
@@ -409,45 +471,70 @@ export function ReportesBICPage() {
                   <span style={{ fontFamily: 'var(--font-numeric)', fontSize: '2.5rem', fontWeight: 500, color: currentGroup.color, lineHeight: 1 }}>
                     {yd.all.length}
                   </span>
-                  <span style={{ color: 'var(--hh-haze)', fontSize: '0.875rem' }}>
-                    proveedores activos en {yd.year}
+                  <span style={{ color: 'var(--hh-haze)', fontSize: '0.875rem' }}>proveedores activos en {yd.year}</span>
+                  <span style={{ marginLeft: 'auto' }}>
+                    <ExportBtn onClick={() => downloadCSV(`${csvPrefix}-activos.csv`,
+                      ['Proveedor', 'NIT', 'Gasto', 'Puntaje BIC', 'Ubicación', 'Independiente', 'En desventaja', '<50 emp', 'Minoría'],
+                      yd.all.map(r => [r.name, r.nit, Math.round(r.total), r.score !== null ? `${r.score}%` : '', r.location,
+                        r.independent === true ? 'Sí' : r.independent === false ? 'No' : '',
+                        r.underserved === true ? 'Sí' : r.underserved === false ? 'No' : '',
+                        r.smallCompany === true ? 'Sí' : r.smallCompany === false ? 'No' : '',
+                        r.minoria === true ? 'Sí' : r.minoria === false ? 'No' : ''])
+                    )} title="Exportar todos los proveedores activos" />
                   </span>
                 </div>
               </Card>
 
-              {/* >12M suppliers */}
+              {/* >12M */}
               <Card>
-                <div style={SH}>Proveedores &gt; $12M · {yd.year}
+                <div style={{ display: 'flex', alignItems: 'center', marginBottom: 12 }}>
+                  <span style={SH}>
+                    Proveedores &gt; $12M · {yd.year}
+                    {yd.bigSpenders.length > 0 && (
+                      <span style={{ marginLeft: 8, background: currentGroup.color, color: currentGroup.textColor, borderRadius: 10, padding: '1px 8px', fontSize: '0.65rem' }}>
+                        {yd.bigSpenders.length}
+                      </span>
+                    )}
+                  </span>
                   {yd.bigSpenders.length > 0 && (
-                    <span style={{ marginLeft: 8, background: currentGroup.color, color: currentGroup.textColor, borderRadius: 10, padding: '1px 8px', fontSize: '0.65rem' }}>
-                      {yd.bigSpenders.length}
+                    <span style={{ marginLeft: 'auto' }}>
+                      <ExportBtn onClick={() => downloadCSV(`${csvPrefix}-12M.csv`,
+                        ['Proveedor', 'NIT', 'Gasto'],
+                        yd.bigSpenders.map(r => [r.name, r.nit, Math.round(r.total)])
+                      )} />
                     </span>
                   )}
                 </div>
-                {yd.bigSpenders.length === 0 ? (
-                  <p style={{ color: 'var(--hh-haze)', fontSize: '0.875rem', margin: 0 }}>Ningún proveedor superó $12M.</p>
-                ) : (
-                  <SupplierList rows={yd.bigSpenders} showScore={false} />
-                )}
+                {yd.bigSpenders.length === 0
+                  ? <p style={{ color: 'var(--hh-haze)', fontSize: '0.875rem', margin: 0 }}>Ningún proveedor superó $12M.</p>
+                  : <SupplierList rows={yd.bigSpenders} showScore={false} />}
               </Card>
 
-              {/* Assessment breakdown */}
+              {/* Assessment */}
               <Card>
-                <div style={SH}>Evaluación BIC</div>
-                <AssessmentGroup label="Aprobado (≥ 60%)"   rows={yd.assessed.passed} color="var(--hh-teal)"  showScore defaultOpen={yd.assessed.passed.length > 0} />
-                <AssessmentGroup label="No aprobado (< 60%)" rows={yd.assessed.failed} color="#B9484E"         showScore />
-                <AssessmentGroup label="Sin evaluación"       rows={yd.assessed.none}  color="var(--hh-haze)" showScore={false} />
+                <div style={{ ...SH, marginBottom: 4 }}>Evaluación BIC</div>
+                <AssessmentGroup label="Aprobado (≥ 60%)"    rows={yd.assessed.passed} color="var(--hh-teal)"  showScore defaultOpen={yd.assessed.passed.length > 0} csvPrefix={csvPrefix} />
+                <AssessmentGroup label="No aprobado (< 60%)" rows={yd.assessed.failed} color="#B9484E"         showScore csvPrefix={csvPrefix} />
+                <AssessmentGroup label="Sin evaluación"       rows={yd.assessed.none}  color="var(--hh-haze)" showScore={false} csvPrefix={csvPrefix} />
               </Card>
 
-              {/* Location breakdown */}
+              {/* Location */}
               {yd.byLocation.length > 0 && (
                 <Card>
-                  <div style={SH}>Ubicación</div>
+                  <div style={{ display: 'flex', alignItems: 'center', marginBottom: 12 }}>
+                    <span style={SH}>Ubicación</span>
+                    <span style={{ marginLeft: 'auto' }}>
+                      <ExportBtn onClick={() => downloadCSV(`${csvPrefix}-ubicacion.csv`,
+                        ['Ubicación', 'Proveedores', 'Gasto Total'],
+                        yd.byLocation.map(b => [b.label, b.rows.length, Math.round(sumSpend(b.rows))])
+                      )} />
+                    </span>
+                  </div>
                   <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                     <tbody>
                       {yd.byLocation.map(b => (
                         <tr key={b.label} style={{ borderBottom: '1px solid rgba(122,145,165,0.07)' }}>
-                          <td style={{ padding: '8px 0', fontSize: '0.8125rem', color: 'var(--hh-dark)', fontWeight: 400 }}>{b.label}</td>
+                          <td style={{ padding: '8px 0', fontSize: '0.8125rem', color: 'var(--hh-dark)' }}>{b.label}</td>
                           <td style={{ padding: '8px 12px', fontSize: '0.8125rem', color: 'var(--hh-haze)', fontFamily: 'var(--font-numeric)' }}>{b.rows.length} prov.</td>
                           <td style={{ padding: '8px 0', fontSize: '0.8125rem', fontFamily: 'var(--font-numeric)', textAlign: 'right', color: 'var(--hh-dark)' }}>{fmt(sumSpend(b.rows))}</td>
                         </tr>
@@ -459,10 +546,10 @@ export function ReportesBICPage() {
 
               {/* Boolean breakdowns */}
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12 }}>
-                <BoolCard label="Proveedor independiente"  b={yd.independent}  color={currentGroup.color} />
-                <BoolCard label="Proveedor en desventaja"  b={yd.underserved}  color={currentGroup.color} />
-                <BoolCard label="Menos de 50 empleados"   b={yd.smallCompany} color={currentGroup.color} />
-                <BoolCard label="Empresa minoría"          b={yd.minoria}      color={currentGroup.color} />
+                <BoolCard label="Proveedor independiente" b={yd.independent}  color={currentGroup.color} csvPrefix={csvPrefix} />
+                <BoolCard label="Proveedor en desventaja" b={yd.underserved}  color={currentGroup.color} csvPrefix={csvPrefix} />
+                <BoolCard label="Menos de 50 empleados"  b={yd.smallCompany} color={currentGroup.color} csvPrefix={csvPrefix} />
+                <BoolCard label="Empresa minoría"         b={yd.minoria}      color={currentGroup.color} csvPrefix={csvPrefix} />
               </div>
 
             </div>
