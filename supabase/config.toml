@@ -6,3 +6,9 @@ verify_jwt = false
 
 [functions.sync-supplier-to-sheets]
 verify_jwt = false
+
+[functions.sync-cxp]
+verify_jwt = false
+
+[functions.approve-cxp]
+verify_jwt = false

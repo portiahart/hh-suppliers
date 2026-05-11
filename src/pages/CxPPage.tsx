@@ -83,7 +83,7 @@ function ApproveBtn({ rowId, onApproved }: { rowId: string; onApproved: () => vo
   const [loading, setLoading] = useState(false)
   async function approve() {
     setLoading(true)
-    await supabase.from('cxp_facturas').update({ aprobado: 'SI' }).eq('id', rowId)
+    await supabase.functions.invoke('approve-cxp', { body: { id: rowId } })
     setLoading(false)
     onApproved()
   }
