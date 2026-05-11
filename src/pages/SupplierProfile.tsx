@@ -2378,7 +2378,7 @@ function BicSheetSection({ supplier }: { supplier: Supplier | null }) {
   if (!supplier) return null
 
   const bic: BicFields = supplier
-  const hasBicData = !!(bic.bic_survey_score || bic.bic_ubicacion || bic.bic_ciudad || bic.bic_pais || bic.bic_independent || bic.bic_underserved || bic.bic_small_company || bic.bic_minoria)
+  const hasBicData = !!(bic.bic_survey_score || bic.bic_ubicacion || bic.bic_independent || bic.bic_underserved || bic.bic_small_company || bic.bic_minoria)
 
   const score = parseSurveyScore(bic.bic_survey_score)
   const scorePass = score !== null && score >= 60
