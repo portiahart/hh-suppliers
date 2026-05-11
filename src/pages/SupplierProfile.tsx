@@ -7,6 +7,8 @@ import type { Supplier } from '../types/supplier'
 import { computeRetenciones } from '../lib/retencionesEngine'
 import type { RetencionRecomendada, RUTData } from '../lib/rutTypes'
 import { CIIU_LABELS, RESPONSABILIDADES_LABELS } from '../lib/rutLookups'
+import { ExcelDownloadButton } from '../components/ExcelDownloadButton'
+import { exportTableToExcel } from '../lib/export-utils'
 
 const TABS = ['General', 'Bancario', 'Evaluación', 'B Corp', 'Gasto', 'Contactos CRM'] as const
 type Tab = typeof TABS[number]
@@ -1270,7 +1272,16 @@ function RetencionesCard({ supplierId, showToast }: { supplierId: string | null;
       title="Retenciones"
       action={
         !editing ? (
-          <div style={{ display: 'flex', gap: 8 }}>
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+            <ExcelDownloadButton onClick={() => exportTableToExcel(displayRows, [
+              { field: 'retencion_tipo', header: 'Tipo' },
+              { field: 'concepto', header: 'Concepto' },
+              { field: 'tarifa_recomendada', header: 'Tarifa Rec. (%)', type: 'number' as const },
+              { field: 'base_minima', header: 'Base Mínima (COP)', type: 'number' as const },
+              { field: 'tarifa_aplicada', header: 'Tarifa Aplic. (%)', type: 'number' as const },
+              { field: (r: any) => r.aplica ? 'Sí' : 'No', header: 'Aplica' },
+              { field: 'notas', header: 'Notas' },
+            ], 'retenciones')} />
             <button onClick={handleRecalculate} disabled={recalculating} style={ghostBtnStyle}>
               {recalculating ? 'Calculando…' : 'Recalcular desde RUT'}
             </button>
@@ -2973,20 +2984,6 @@ function GastoTab({ supplierId, nit }: { supplierId: string | null; nit: string 
   const fmtDate = (d: string | null) =>
     d ? new Date(d).toLocaleDateString('es-CO', { day: '2-digit', month: '2-digit', year: '2-digit' }) : '—'
 
-  const downloadCSV = () => {
-    const headers = ['Fecha Op','Fecha Fac','Descripción','Clasificación','Importe COP','Empresa','Fuente','No. Factura']
-    const rows = txns.map(t => [
-      t.fecha_operacion ?? '', t.fecha_factura ?? '', t.concepto ?? '',
-      t.centro_costo ?? '', t.importe_cop ?? '', t.empresa ?? '',
-      t.source === 'CASHAPP' ? 'Cash App' : 'Banco', t.no_fac ?? 'N/A',
-    ])
-    const csv = [headers, ...rows].map(r => r.map(v => `"${String(v).replace(/"/g, '""')}"`).join(',')).join('\n')
-    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' })
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement('a'); a.href = url; a.download = 'transacciones.csv'; a.click()
-    URL.revokeObjectURL(url)
-  }
-
   const EmpresaPill = ({ empresa }: { empresa: string | null }) => {
     if (!empresa) return <span style={{ color: 'var(--hh-haze)' }}>—</span>
     return (
@@ -3045,7 +3042,14 @@ function GastoTab({ supplierId, nit }: { supplierId: string | null; nit: string 
       </SectionCard>
 
       {/* ── Card 2: Retenciones Aplicadas ── */}
-      <SectionCard title="Retenciones Aplicadas">
+      <SectionCard title="Retenciones Aplicadas" action={
+        <ExcelDownloadButton onClick={() => exportTableToExcel(retRows, [
+          { field: 'label', header: 'Concepto' },
+          { field: 'total', header: 'Monto', type: 'number' as const },
+          { field: (r: any) => r.tasa != null ? r.tasa : '', header: 'Tasa Prom. (%)' },
+          { field: 'count', header: 'Txns', type: 'number' as const },
+        ], 'retenciones_aplicadas')} />
+      }>
         {txLoading ? <SkeletonFields /> : (
           <>
             <div style={{ overflowX: 'auto' }}>
@@ -3084,9 +3088,21 @@ function GastoTab({ supplierId, nit }: { supplierId: string | null; nit: string 
       <SectionCard
         title={`Todas las Transacciones${!txLoading ? ` (${txns.length})` : ''}`}
         action={
-          <button onClick={downloadCSV} title="Descargar CSV" style={{ ...ghostBtnStyle, padding: '6px 10px' }}>
-            <DownloadIcon width={14} height={14} />
-          </button>
+          <ExcelDownloadButton onClick={() => {
+            const hasLinks = txns.some((t: any) => t.doc_url);
+            const cols: any[] = [
+              { field: 'fecha_operacion', header: 'Fecha Op.', type: 'date' as const },
+              { field: 'fecha_factura', header: 'Fecha Fac.', type: 'date' as const },
+              { field: 'concepto', header: 'Descripción' },
+              { field: 'centro_costo', header: 'Clasificación' },
+              { field: 'importe_cop', header: 'Importe COP', type: 'number' as const },
+              { field: (t: any) => t.empresa || '', header: 'Empresa' },
+              { field: (t: any) => t.source === 'CASHAPP' ? 'Cash App' : 'Banco', header: 'Fuente' },
+              { field: 'no_fac', header: 'No. Factura' },
+            ];
+            if (hasLinks) cols.push({ field: (t: any) => t.doc_url || '', header: 'URL Factura' });
+            exportTableToExcel(txns, cols, 'transacciones');
+          }} />
         }
       >
         {txLoading ? <SkeletonFields /> : txns.length === 0 ? (
@@ -3121,7 +3137,22 @@ function GastoTab({ supplierId, nit }: { supplierId: string | null; nit: string 
       </SectionCard>
 
       {/* ── Card 4: Facturas Pagadas ── */}
-      <SectionCard title={`Facturas Pagadas${!txLoading ? ` (${txns.length})` : ''}`}>
+      <SectionCard title={`Facturas Pagadas${!txLoading ? ` (${txns.length})` : ''}`} action={
+        <ExcelDownloadButton onClick={() => {
+          const hasLinks = txns.some((t: any) => t.doc_url);
+          const cols: any[] = [
+            { field: 'fecha_operacion', header: 'Fecha Op.', type: 'date' as const },
+            { field: 'importe_cop', header: 'Importe COP', type: 'number' as const },
+            { field: 'no_fac', header: 'No. Factura' },
+            { field: 'fecha_factura', header: 'Fecha Factura', type: 'date' as const },
+            { field: 'concepto', header: 'Concepto' },
+            { field: 'centro_costo', header: 'Centro de Costo' },
+            { field: (t: any) => t.empresa || '', header: 'Empresa' },
+          ];
+          if (hasLinks) cols.push({ field: (t: any) => t.doc_url || '', header: 'URL Factura' });
+          exportTableToExcel(txns, cols, 'facturas_pagadas');
+        }} />
+      }>
         {txLoading ? <SkeletonFields /> : txns.length === 0 ? (
           <p style={{ fontFamily: 'var(--font-display)', fontWeight: 300, fontStyle: 'italic', fontSize: '0.9375rem', color: 'var(--hh-haze)', margin: 0 }}>
             Sin facturas pagadas.
@@ -3160,7 +3191,24 @@ function GastoTab({ supplierId, nit }: { supplierId: string | null; nit: string 
       </SectionCard>
 
       {/* ── Card 5: Cuentas por Pagar ── */}
-      <SectionCard title={`Cuentas por Pagar${!txLoading ? ` (${cpp.length})` : ''}`}>
+      <SectionCard title={`Cuentas por Pagar${!txLoading ? ` (${cpp.length})` : ''}`} action={
+        <ExcelDownloadButton onClick={() => {
+          const hasLinks = cpp.some((c: any) => c.doc_url);
+          const cols: any[] = [
+            { field: 'fecha_operacion', header: 'Fecha Op.', type: 'date' as const },
+            { field: 'importe_cop', header: 'Importe', type: 'number' as const },
+            { field: 'no_fac', header: 'No. Factura' },
+            { field: 'fecha_factura', header: 'Fecha Factura', type: 'date' as const },
+            { field: 'concepto', header: 'Concepto' },
+            { field: 'centro_costo', header: 'Centro de Costo' },
+            { field: (c: any) => c.empresa || '', header: 'Empresa' },
+            { field: 'fecha_vencimiento', header: 'Vencimiento', type: 'date' as const },
+            { field: (c: any) => c.aprobado === 'SI' ? 'Sí' : 'No', header: 'Aprobado' },
+          ];
+          if (hasLinks) cols.push({ field: (c: any) => c.doc_url || '', header: 'URL Factura' });
+          exportTableToExcel(cpp, cols, 'cuentas_por_pagar');
+        }} />
+      }>
         {txLoading ? <SkeletonFields /> : cpp.length === 0 ? (
           <p style={{ fontFamily: 'var(--font-display)', fontWeight: 300, fontStyle: 'italic', fontSize: '0.9375rem', color: 'var(--hh-haze)', margin: 0 }}>
             Sin facturas pendientes

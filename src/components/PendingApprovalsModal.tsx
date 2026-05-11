@@ -2,6 +2,8 @@ import { useState, useEffect, useRef } from 'react'
 import { CheckIcon, Cross2Icon } from '@radix-ui/react-icons'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../context/AuthContext'
+import { ExcelDownloadButton } from './ExcelDownloadButton'
+import { exportTableToExcel } from '../lib/export-utils'
 
 /* ─── Date helpers ───────────────────────────────────────── */
 
@@ -280,14 +282,24 @@ export function PendingApprovalsModal({ onClose, onApproved }: Props) {
                 {loading ? 'Cargando…' : fetchError ? 'Error al cargar' : `${visible.length} facturas · ${fmt(grandTotal)}`}
               </p>
             </div>
-            <button
-              onClick={onClose}
-              style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--hh-haze)', padding: 4, borderRadius: 4, display: 'flex', alignItems: 'center' }}
-              onMouseEnter={e => { e.currentTarget.style.color = 'var(--hh-dark)' }}
-              onMouseLeave={e => { e.currentTarget.style.color = 'var(--hh-haze)' }}
-            >
-              <Cross2Icon width={18} height={18} />
-            </button>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              <ExcelDownloadButton onClick={() => exportTableToExcel(visible, [
+                { field: 'proveedor', header: 'Proveedor' },
+                { field: 'empresa', header: 'Empresa' },
+                { field: 'concepto', header: 'Concepto' },
+                { field: 'centroCosto', header: 'Centro de Costo' },
+                { field: 'fechaVencimiento', header: 'Vencimiento' },
+                { field: 'importe', header: 'Importe', type: 'number' as const },
+              ], 'facturas_pendientes')} />
+              <button
+                onClick={onClose}
+                style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--hh-haze)', padding: 4, borderRadius: 4, display: 'flex', alignItems: 'center' }}
+                onMouseEnter={e => { e.currentTarget.style.color = 'var(--hh-dark)' }}
+                onMouseLeave={e => { e.currentTarget.style.color = 'var(--hh-haze)' }}
+              >
+                <Cross2Icon width={18} height={18} />
+              </button>
+            </div>
           </div>
 
           {/* Body */}

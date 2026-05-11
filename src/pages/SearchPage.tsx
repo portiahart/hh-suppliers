@@ -10,6 +10,8 @@ import {
 import { supabase, suppliersQuery } from '../lib/supabase'
 import type { Supplier } from '../types/supplier'
 import { PendingApprovalsModal } from '../components/PendingApprovalsModal'
+import { ExcelDownloadButton } from '../components/ExcelDownloadButton'
+import { exportTableToExcel } from '../lib/export-utils'
 
 /* ─── Types ──────────────────────────────────────────────── */
 
@@ -954,7 +956,20 @@ function InvoiceModal({ title, rows, onClose }: { title: string; rows: CppInvoic
               {rows.length} {rows.length === 1 ? 'factura' : 'facturas'}
             </p>
           </div>
-          <button
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            <ExcelDownloadButton onClick={() => exportTableToExcel(sorted, [
+              { field: 'proveedor', header: 'Proveedor' },
+              { field: (r: any) => {
+                if (r.empresa_split && Array.isArray(r.empresa_split) && r.empresa_split.length > 0)
+                  return r.empresa_split.map((s: any) => s.code).join(' | ');
+                return r.empresa || '';
+              }, header: 'Empresa' },
+              { field: 'concepto', header: 'Concepto' },
+              { field: 'centro_costo', header: 'Centro de Costo' },
+              { field: 'fecha_vencimiento', header: 'Vencimiento', type: 'date' as const },
+              { field: 'importe_cop', header: 'Importe', type: 'number' as const },
+            ], 'facturas_pendientes')} />
+            <button
             onClick={onClose}
             style={{
               background: 'none', border: 'none', cursor: 'pointer',
@@ -966,6 +981,7 @@ function InvoiceModal({ title, rows, onClose }: { title: string; rows: CppInvoic
           >
             <Cross2Icon width={18} height={18} />
           </button>
+          </div>
         </div>
 
         {/* Table */}

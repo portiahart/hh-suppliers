@@ -1,6 +1,7 @@
 import { useState, useEffect, useMemo } from 'react'
 import { Link } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
+import * as XLSX from 'xlsx'
 
 /* ─── Entity groups ──────────────────────────────────────────────────────── */
 
@@ -15,13 +16,11 @@ type GroupKey = typeof GROUPS[number]['key']
 /* ─── CSV export ─────────────────────────────────────────────────────────── */
 
 function downloadCSV(filename: string, headers: string[], rows: (string | number | null)[][]) {
-  const esc = (v: string | number | null) => `"${String(v ?? '').replace(/"/g, '""')}"`
-  const lines = [headers, ...rows].map(r => r.map(esc).join(','))
-  const blob = new Blob(['﻿' + lines.join('\n')], { type: 'text/csv;charset=utf-8;' })
-  const url = URL.createObjectURL(blob)
-  const a = Object.assign(document.createElement('a'), { href: url, download: filename })
-  a.click()
-  URL.revokeObjectURL(url)
+  const wsData = [headers, ...rows];
+  const ws = XLSX.utils.aoa_to_sheet(wsData);
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, 'Datos');
+  XLSX.writeFile(wb, filename.replace(/\.csv$/, '.xlsx'));
 }
 
 function ExportBtn({ onClick, title = 'Descargar Excel' }: { onClick: () => void; title?: string }) {
@@ -200,10 +199,10 @@ function AssessmentGroup({
   const spend = sumSpend(rows)
 
   const exportRows = () => {
-    const headers = showScore ? ['Proveedor', 'NIT', 'Puntaje', 'Gasto'] : ['Proveedor', 'NIT', 'Gasto']
+    const headers = showScore ? ['Proveedor', 'NIT', 'Puntaje', 'Gasto', 'URL'] : ['Proveedor', 'NIT', 'Gasto', 'URL']
     const data = rows.map(r => showScore
-      ? [r.name, r.nit, r.score !== null ? `${r.score}%` : '', Math.round(r.total)]
-      : [r.name, r.nit, Math.round(r.total)])
+      ? [r.name, r.nit, r.score !== null ? `${r.score}%` : '', Math.round(r.total), `${window.location.origin}/suppliers/${r.supplier_id}`]
+      : [r.name, r.nit, Math.round(r.total), `${window.location.origin}/suppliers/${r.supplier_id}`])
     downloadCSV(`${csvPrefix}-${label.replace(/[^a-zA-Z0-9]/g, '_')}.csv`, headers, data)
   }
 
@@ -231,11 +230,11 @@ function BoolCard({ label, b, color, csvPrefix }: { label: string; b: BoolBucket
   const noSpend  = sumSpend(b.no)
 
   const exportBool = () => {
-    const headers = ['Proveedor', 'NIT', 'Gasto', label]
+    const headers = ['Proveedor', 'NIT', 'Gasto', label, 'URL']
     const rows = [
-      ...b.yes.map(r => [r.name, r.nit, Math.round(r.total), 'Sí']),
-      ...b.no.map(r => [r.name, r.nit, Math.round(r.total), 'No']),
-      ...b.unknown.map(r => [r.name, r.nit, Math.round(r.total), '']),
+      ...b.yes.map(r => [r.name, r.nit, Math.round(r.total), 'Sí', `${window.location.origin}/suppliers/${r.supplier_id}`]),
+      ...b.no.map(r => [r.name, r.nit, Math.round(r.total), 'No', `${window.location.origin}/suppliers/${r.supplier_id}`]),
+      ...b.unknown.map(r => [r.name, r.nit, Math.round(r.total), '', `${window.location.origin}/suppliers/${r.supplier_id}`]),
     ]
     downloadCSV(`${csvPrefix}-${label.replace(/[^a-zA-Z0-9]/g, '_')}.csv`, headers, rows)
   }
