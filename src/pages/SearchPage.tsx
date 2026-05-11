@@ -526,9 +526,9 @@ export function SearchPage() {
         <h2 style={sectionHeadingStyle}>Top 20 · Últimos 60 días</h2>
 
         <div style={tableCardStyle}>
-          <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+          <table className="hh-table">
             <thead>
-              <tr style={{ borderBottom: '1px solid rgba(122,145,165,0.2)' }}>
+              <tr>
                 <Th align="left">Nombre</Th>
                 <Th align="left">Entidades</Th>
                 <Th align="left">Evaluación</Th>
@@ -564,9 +564,8 @@ export function SearchPage() {
                   return (
                     <tr
                       key={row.nit}
-                      style={{ background: idx % 2 === 1 ? 'var(--hh-ice)' : 'var(--hh-white)' }}
-                    >
-                      <td style={tdStyle}>
+                                         >
+                      <td>
                         {row.id ? (
                           <button
                             onClick={() => navigate(`/suppliers/${row.id}`)}
@@ -595,21 +594,21 @@ export function SearchPage() {
                           </span>
                         )}
                       </td>
-                      <td style={tdStyle}>
+                      <td>
                         <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
                           {row.entities.map(e => (
                             <EntityPill key={e.entity} entity={e.entity} amount={e.amount_cop} />
                           ))}
                         </div>
                       </td>
-                      <td style={tdStyle}>
+                      <td>
                         <AssessmentBadge pass={assessment} />
                       </td>
-                      <td style={{ ...tdStyle, textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>
+                      <td style={{ textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>
                         {formatCOP(row.gasto)}
                       </td>
-                      <td style={{ ...tdStyle, textAlign: 'right', color: 'var(--hh-haze)' }}>—</td>
-                      <td style={tdStyle}>
+                      <td style={{ textAlign: 'right', color: 'var(--hh-haze)' }}>—</td>
+                      <td>
                         {row.id ? (
                           <button
                             onClick={() => navigate(`/suppliers/${row.id}`)}
@@ -789,17 +788,7 @@ function ActionCard({
 
 function Th({ children, align }: { children: React.ReactNode; align: 'left' | 'right' }) {
   return (
-    <th style={{
-      fontFamily: 'var(--font-body)',
-      fontWeight: 500,
-      fontSize: '0.6875rem',
-      textTransform: 'uppercase',
-      letterSpacing: '0.12em',
-      color: 'var(--hh-haze)',
-      textAlign: align,
-      padding: '11px 16px',
-      whiteSpace: 'nowrap',
-    }}>
+    <th style={{ textAlign: align }}>
       {children}
     </th>
   )
@@ -849,7 +838,7 @@ function SkeletonRow({ cols, even }: { cols: number; even: boolean }) {
   return (
     <tr style={{ background: even ? 'var(--hh-ice)' : 'var(--hh-white)' }}>
       {Array.from({ length: cols }).map((_, i) => (
-        <td key={i} style={tdStyle}>
+        <td key={i}>
           <span style={{ ...shimmer, width: widths[i] ?? 80 }} />
         </td>
       ))}
@@ -986,9 +975,9 @@ function InvoiceModal({ title, rows, onClose }: { title: string; rows: CppInvoic
 
         {/* Table */}
         <div style={{ overflowY: 'auto', flexGrow: 1 }}>
-          <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-            <thead style={{ position: 'sticky', top: 0, background: 'var(--hh-white)', zIndex: 1 }}>
-              <tr style={{ borderBottom: '1px solid rgba(122,145,165,0.2)' }}>
+          <table className="hh-table">
+            <thead style={{ position: 'sticky', top: 0, zIndex: 1 }}>
+              <tr>
                 <Th align="left">Proveedor</Th>
                 <Th align="left">Empresa</Th>
                 <Th align="left">Concepto</Th>
@@ -1002,8 +991,8 @@ function InvoiceModal({ title, rows, onClose }: { title: string; rows: CppInvoic
                 const badges = companyBadges(row)
                 return (
                   <tr key={idx} style={{ background: idx % 2 === 1 ? 'var(--hh-ice)' : 'var(--hh-white)' }}>
-                    <td style={tdStyle}>{row.proveedor ?? '—'}</td>
-                    <td style={tdStyle}>
+                    <td>{row.proveedor ?? '—'}</td>
+                    <td>
                       <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
                         {badges.length > 0
                           ? badges.map(code => <CompactPill key={code} code={code} />)
@@ -1011,14 +1000,14 @@ function InvoiceModal({ title, rows, onClose }: { title: string; rows: CppInvoic
                         }
                       </div>
                     </td>
-                    <td style={{ ...tdStyle, maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    <td style={{ maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                       {row.concepto ?? '—'}
                     </td>
-                    <td style={tdStyle}>{row.centro_costo ?? '—'}</td>
-                    <td style={{ ...tdStyle, textAlign: 'right', whiteSpace: 'nowrap', fontVariantNumeric: 'tabular-nums' }}>
+                    <td>{row.centro_costo ?? '—'}</td>
+                    <td style={{ textAlign: 'right', whiteSpace: 'nowrap', fontVariantNumeric: 'tabular-nums' }}>
                       {row.fecha_vencimiento ?? '—'}
                     </td>
-                    <td style={{ ...tdStyle, textAlign: 'right', fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' }}>
+                    <td style={{ textAlign: 'right', fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' }}>
                       {formatCOP(Number(row.importe_cop ?? 0))}
                     </td>
                   </tr>

@@ -419,6 +419,20 @@ Edge function secrets are stored in Supabase Vault (not in .env).
 
 ---
 
+## Table Standard
+
+All data tables follow the **HH Table Design Standard** defined in `HH_ECOSYSTEM.md` (in the hh-accounts repo).
+
+**Implementation:** `.hh-table` CSS class in `src/index.css`. Use `className="hh-table"` on every `<table>` element. Because this app has no shadcn/ui, all other UI is inline styles — tables are the exception, using the shared class.
+
+**Download button:** `ExcelDownloadButton` component at `src/components/ExcelDownloadButton.tsx`. Renders `↓ XLSX` text button placed in the SectionCard `action` prop (right side of card header).
+
+**Links in cells:** Inline style `color:'#4A9B8E'; textDecoration:'underline'; fontSize:'11px'; fontFamily:'DM Sans,system-ui,sans-serif'`. For document links that open a viewer, use the existing `openDoc()` pattern with a styled `<a>` tag — not a button.
+
+**Export:** `exportTableToExcel()` from `src/lib/export-utils.ts`. Numbers raw, dates DD-MM-YYYY. Link columns (`doc_url`) appended automatically when any row has a URL.
+
+---
+
 ## Key Conventions
 
 - **No TanStack Query** — all data fetching in `useEffect` / `useCallback` with local `useState`. Pattern: set loading=true, fetch, set data, set loading=false.

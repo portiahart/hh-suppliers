@@ -1,6 +1,6 @@
 import { useState, useEffect, Fragment } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
-import { ArrowLeftIcon, Pencil1Icon, DownloadIcon } from '@radix-ui/react-icons'
+import { ArrowLeftIcon, Pencil1Icon } from '@radix-ui/react-icons'
 import { useAuth } from '../context/AuthContext'
 import { supabase } from '../lib/supabase'
 import type { Supplier } from '../types/supplier'
@@ -1304,11 +1304,11 @@ function RetencionesCard({ supplierId, showToast }: { supplierId: string | null;
         <SkeletonFields />
       ) : (
         <div style={{ overflowX: 'auto' }}>
-          <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 720 }}>
+          <table className="hh-table" style={{ minWidth: 720 }}>
             <thead>
-              <tr style={{ borderBottom: '1px solid rgba(122,145,165,0.2)' }}>
+              <tr>
                 {['Tipo', 'Concepto', 'Tarifa Rec. (%)', 'Base Mínima (COP)', 'Tarifa Aplic. (%)', 'Aplica', 'Notas'].map(h => (
-                  <th key={h} style={retThStyle}>{h}</th>
+                  <th key={h}>{h}</th>
                 ))}
               </tr>
             </thead>
@@ -1316,8 +1316,8 @@ function RetencionesCard({ supplierId, showToast }: { supplierId: string | null;
               {(displayRows.length > 0 ? displayRows : RET_PLACEHOLDER_ROWS).map((r, idx) => {
                 const isPlaceholder = displayRows.length === 0 && !editing
                 return (
-                  <tr key={r.id} style={{ background: idx % 2 === 1 ? 'var(--hh-ice)' : 'var(--hh-white)' }}>
-                    <td style={retTdStyle}>
+                  <tr key={r.id}>
+                    <td>
                       {editing && !isPlaceholder ? (
                         <select value={r.retencion_tipo} onChange={e => updateRow(r.id, 'retencion_tipo', e.target.value)} style={{ ...inputStyle, width: 'auto' }}>
                           <option>Retefuente</option>
@@ -1328,12 +1328,12 @@ function RetencionesCard({ supplierId, showToast }: { supplierId: string | null;
                         <span style={{ fontFamily: 'var(--font-body)', fontSize: '0.8125rem', fontWeight: 500 }}>{r.retencion_tipo}</span>
                       )}
                     </td>
-                    <td style={retTdStyle}>
+                    <td>
                       {editing && !isPlaceholder
                         ? <input type="text" value={r.concepto ?? ''} onChange={e => updateRow(r.id, 'concepto', e.target.value || null)} style={inputStyle} />
-                        : <span style={retValStyle}>{r.concepto ?? <Muted>—</Muted>}</span>}
+                        : <span>{r.concepto ?? <Muted>—</Muted>}</span>}
                     </td>
-                    <td style={retTdStyle}>
+                    <td>
                       {editing && !isPlaceholder
                         ? <input type="number" value={r.tarifa_recomendada ?? ''} onChange={e => updateRow(r.id, 'tarifa_recomendada', e.target.value ? Number(e.target.value) : null)} style={{ ...inputStyle, width: 64 }} />
                         : r.tarifa_recomendada === null && r.aplica ? (
@@ -1341,24 +1341,24 @@ function RetencionesCard({ supplierId, showToast }: { supplierId: string | null;
                             Revisar
                           </span>
                         ) : (
-                          <span style={{ ...retValStyle, color: 'var(--hh-haze)', fontFamily: 'var(--font-numeric)', fontVariantNumeric: 'tabular-nums' }}>
+                          <span style={{ color: 'var(--hh-haze)', fontFamily: 'var(--font-numeric)', fontVariantNumeric: 'tabular-nums' }}>
                             {r.tarifa_recomendada != null ? `${r.tarifa_recomendada}${r.retencion_tipo === 'ReteICA' ? '‰' : '%'}` : <Muted>—</Muted>}
                           </span>
                         )
                       }
                     </td>
-                    <td style={retTdStyle}>
+                    <td>
                       {editing && !isPlaceholder
                         ? <input type="number" value={r.base_minima ?? ''} onChange={e => updateRow(r.id, 'base_minima', e.target.value ? Number(e.target.value) : null)} style={{ ...inputStyle, width: 110 }} />
-                        : <span style={{ ...retValStyle, fontFamily: 'var(--font-numeric)', fontVariantNumeric: 'tabular-nums' }}>{r.base_minima != null ? `$${Math.round(r.base_minima).toLocaleString('es-CO')}` : <Muted>—</Muted>}</span>}
+                        : <span style={{ fontFamily: 'var(--font-numeric)', fontVariantNumeric: 'tabular-nums' }}>{r.base_minima != null ? `$${Math.round(r.base_minima).toLocaleString('es-CO')}` : <Muted>—</Muted>}</span>}
                     </td>
-                    <td style={retTdStyle}>
+                    <td>
                       {editing && !isPlaceholder
                         ? <input type="number" value={r.tarifa_aplicada ?? ''} onChange={e => updateRow(r.id, 'tarifa_aplicada', e.target.value ? Number(e.target.value) : null)} style={{ ...inputStyle, width: 64 }} />
                         : (() => {
                             const differs = r.tarifa_aplicada != null && r.tarifa_aplicada !== r.tarifa_recomendada
                             return (
-                              <span style={{ ...retValStyle, color: differs ? 'var(--hh-teal)' : undefined, fontFamily: 'var(--font-numeric)', fontVariantNumeric: 'tabular-nums', display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                              <span style={{ color: differs ? 'var(--hh-teal)' : undefined, fontFamily: 'var(--font-numeric)', fontVariantNumeric: 'tabular-nums', display: 'inline-flex', alignItems: 'center', gap: 4 }}>
                                 {r.tarifa_aplicada != null ? `${r.tarifa_aplicada}${r.retencion_tipo === 'ReteICA' ? '‰' : '%'}` : <Muted>—</Muted>}
                                 {differs && <Pencil1Icon width={11} height={11} style={{ opacity: 0.7 }} />}
                               </span>
@@ -1366,7 +1366,7 @@ function RetencionesCard({ supplierId, showToast }: { supplierId: string | null;
                           })()
                       }
                     </td>
-                    <td style={retTdStyle}>
+                    <td>
                       {editing && !isPlaceholder ? (
                         <input type="checkbox" checked={r.aplica} onChange={e => updateRow(r.id, 'aplica', e.target.checked)} style={{ cursor: 'pointer', width: 16, height: 16 }} />
                       ) : (
@@ -1380,10 +1380,10 @@ function RetencionesCard({ supplierId, showToast }: { supplierId: string | null;
                         </span>
                       )}
                     </td>
-                    <td style={retTdStyle}>
+                    <td>
                       {editing && !isPlaceholder
                         ? <input type="text" value={r.notas ?? ''} onChange={e => updateRow(r.id, 'notas', e.target.value || null)} style={inputStyle} />
-                        : <span style={{ ...retValStyle, maxWidth: 260, display: 'inline-block' }}>{r.notas ?? <Muted>—</Muted>}</span>}
+                        : <span style={{ maxWidth: 260, display: 'inline-block' }}>{r.notas ?? <Muted>—</Muted>}</span>}
                     </td>
                   </tr>
                 )
@@ -3002,9 +3002,6 @@ function GastoTab({ supplierId, nit }: { supplierId: string | null; nit: string 
     )
   }
 
-  const tblTh = retThStyle
-  const tblTd = retTdStyle
-  const tblVal = retValStyle
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
@@ -3053,23 +3050,23 @@ function GastoTab({ supplierId, nit }: { supplierId: string | null; nit: string 
         {txLoading ? <SkeletonFields /> : (
           <>
             <div style={{ overflowX: 'auto' }}>
-              <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 420 }}>
+              <table className="hh-table" style={{ minWidth: 420 }}>
                 <thead>
-                  <tr style={{ borderBottom: '1px solid rgba(122,145,165,0.2)' }}>
-                    {['Concepto', 'Monto', 'Tasa Prom.', 'Txns'].map(h => <th key={h} style={tblTh}>{h}</th>)}
+                  <tr>
+                    {['Concepto', 'Monto', 'Tasa Prom.', 'Txns'].map(h => <th key={h}>{h}</th>)}
                   </tr>
                 </thead>
                 <tbody>
                   {retRows.map((r, i) => (
-                    <tr key={r.label} style={{ background: i % 2 === 1 ? 'var(--hh-ice)' : 'var(--hh-white)' }}>
-                      <td style={{ ...tblTd, fontFamily: 'var(--font-body)', fontWeight: 500, fontSize: '0.875rem', color: 'var(--hh-dark)' }}>{r.label}</td>
-                      <td style={{ ...tblTd, fontFamily: 'var(--font-numeric)', fontVariantNumeric: 'tabular-nums', fontSize: '0.875rem', color: r.total > 0 ? 'var(--hh-dark)' : 'var(--hh-haze)' }}>
+                    <tr key={r.label}>
+                      <td style={{ fontWeight: 500 }}>{r.label}</td>
+                      <td style={{ fontVariantNumeric: 'tabular-nums', color: r.total > 0 ? 'var(--hh-dark)' : 'var(--hh-haze)' }}>
                         {r.total > 0 ? formatCOPFull(r.total) : '—'}
                       </td>
-                      <td style={{ ...tblTd, fontFamily: 'var(--font-body)', fontSize: '0.875rem', color: r.tasa != null ? 'var(--hh-dark)' : 'var(--hh-haze)' }}>
+                      <td style={{ color: r.tasa != null ? 'var(--hh-dark)' : 'var(--hh-haze)' }}>
                         {r.tasa != null ? `${r.tasa.toFixed(2)}%` : '—'}
                       </td>
-                      <td style={{ ...tblTd, fontFamily: 'var(--font-body)', fontSize: '0.875rem', color: r.count > 0 ? 'var(--hh-dark)' : 'var(--hh-haze)' }}>
+                      <td style={{ color: r.count > 0 ? 'var(--hh-dark)' : 'var(--hh-haze)' }}>
                         {r.count > 0 ? r.count : '—'}
                       </td>
                     </tr>
@@ -3111,23 +3108,23 @@ function GastoTab({ supplierId, nit }: { supplierId: string | null; nit: string 
           </p>
         ) : (
           <div style={{ overflowX: 'auto' }}>
-            <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 800 }}>
+            <table className="hh-table" style={{ minWidth: 800 }}>
               <thead>
-                <tr style={{ borderBottom: '1px solid rgba(122,145,165,0.2)' }}>
-                  {['Fecha Op','Fecha Fac','Descripción','Clasificación','Importe COP','Empresa','Fuente','No. Factura'].map(h => <th key={h} style={tblTh}>{h}</th>)}
+                <tr>
+                  {['Fecha Op','Fecha Fac','Descripción','Clasificación','Importe COP','Empresa','Fuente','No. Factura'].map(h => <th key={h}>{h}</th>)}
                 </tr>
               </thead>
               <tbody>
                 {txns.map((t, i) => (
-                  <tr key={t.id} style={{ background: i % 2 === 1 ? 'var(--hh-ice)' : 'var(--hh-white)' }}>
-                    <td style={tblTd}><span style={{ ...tblVal, whiteSpace: 'nowrap' }}>{fmtDate(t.fecha_operacion)}</span></td>
-                    <td style={tblTd}><span style={{ ...tblVal, whiteSpace: 'nowrap' }}>{fmtDate(t.fecha_factura)}</span></td>
-                    <td style={{ ...tblTd, maxWidth: 200 }}><span style={{ ...tblVal, display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{t.concepto ?? <span style={{ color: 'var(--hh-haze)' }}>—</span>}</span></td>
-                    <td style={tblTd}><span style={{ ...tblVal, whiteSpace: 'nowrap' }}>{t.centro_costo ?? <span style={{ color: 'var(--hh-haze)' }}>—</span>}</span></td>
-                    <td style={{ ...tblTd, textAlign: 'right' }}><span style={{ fontFamily: 'var(--font-numeric)', fontVariantNumeric: 'tabular-nums', fontWeight: 500, fontSize: '0.875rem', color: 'var(--hh-mango)', whiteSpace: 'nowrap' }}>{formatCOPFull(t.importe_cop ?? 0)}</span></td>
-                    <td style={tblTd}><EmpresaPill empresa={t.empresa} /></td>
-                    <td style={tblTd}><span style={tblVal}>{t.source === 'CASHAPP' ? 'Cash App' : 'Banco'}</span></td>
-                    <td style={tblTd}>{t.doc_url && t.no_fac ? <a href={t.doc_url} target="_blank" rel="noopener noreferrer" style={{ fontFamily: 'var(--font-body)', fontSize: '0.875rem', fontWeight: 400, color: 'var(--hh-teal)', textDecoration: 'underline' }}>{t.no_fac}</a> : <span style={{ fontFamily: 'var(--font-body)', fontSize: '0.875rem', fontWeight: 400, color: t.no_fac ? 'var(--hh-teal)' : 'var(--hh-haze)' }}>{t.no_fac ?? 'N/A'}</span>}</td>
+                  <tr key={t.id}>
+                    <td><span style={{ whiteSpace: 'nowrap' }}>{fmtDate(t.fecha_operacion)}</span></td>
+                    <td><span style={{ whiteSpace: 'nowrap' }}>{fmtDate(t.fecha_factura)}</span></td>
+                    <td style={{ maxWidth: 200 }}><span style={{ display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{t.concepto ?? <span style={{ color: 'var(--hh-haze)' }}>—</span>}</span></td>
+                    <td><span style={{ whiteSpace: 'nowrap' }}>{t.centro_costo ?? <span style={{ color: 'var(--hh-haze)' }}>—</span>}</span></td>
+                    <td style={{ textAlign: 'right' }}><span style={{ fontFamily: 'var(--font-numeric)', fontVariantNumeric: 'tabular-nums', color: 'var(--hh-mango)', whiteSpace: 'nowrap' }}>{formatCOPFull(t.importe_cop ?? 0)}</span></td>
+                    <td><EmpresaPill empresa={t.empresa} /></td>
+                    <td>{t.source === 'CASHAPP' ? 'Cash App' : 'Banco'}</td>
+                    <td>{t.doc_url && t.no_fac ? <a href={t.doc_url} target="_blank" rel="noopener noreferrer" className="hh-link">{t.no_fac}</a> : <span style={{ color: t.no_fac ? 'var(--hh-teal)' : 'var(--hh-haze)' }}>{t.no_fac ?? 'N/A'}</span>}</td>
                   </tr>
                 ))}
               </tbody>
@@ -3159,30 +3156,30 @@ function GastoTab({ supplierId, nit }: { supplierId: string | null; nit: string 
           </p>
         ) : (
           <div style={{ overflowX: 'auto' }}>
-            <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 640 }}>
+            <table className="hh-table" style={{ minWidth: 640 }}>
               <thead>
-                <tr style={{ borderBottom: '1px solid rgba(122,145,165,0.2)' }}>
-                  {['Fecha Op','Importe COP','No. Factura','Fecha Factura','Concepto','Centro de Costo','Empresa'].map(h => <th key={h} style={tblTh}>{h}</th>)}
+                <tr>
+                  {['Fecha Op','Importe COP','No. Factura','Fecha Factura','Concepto','Centro de Costo','Empresa'].map(h => <th key={h}>{h}</th>)}
                 </tr>
               </thead>
               <tbody>
                 {txns.map((t, i) => (
-                  <tr key={t.id} style={{ background: i % 2 === 1 ? 'var(--hh-ice)' : 'var(--hh-white)' }}>
-                    <td style={tblTd}><span style={{ ...tblVal, whiteSpace: 'nowrap' }}>{fmtDate(t.fecha_operacion)}</span></td>
-                    <td style={{ ...tblTd, textAlign: 'right' }}><span style={{ ...tblVal, fontFamily: 'var(--font-numeric)', fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' }}>{formatCOPFull(t.importe_cop ?? 0)}</span></td>
-                    <td style={tblTd}>{t.doc_url && t.no_fac ? <a href={t.doc_url} target="_blank" rel="noopener noreferrer" style={{ fontFamily: 'var(--font-body)', fontSize: '0.875rem', color: 'var(--hh-teal)', textDecoration: 'underline' }}>{t.no_fac}</a> : <span style={{ fontFamily: 'var(--font-body)', fontSize: '0.875rem', color: t.no_fac ? 'var(--hh-teal)' : 'var(--hh-haze)' }}>{t.no_fac ?? 'N/A'}</span>}</td>
-                    <td style={tblTd}><span style={{ ...tblVal, whiteSpace: 'nowrap' }}>{fmtDate(t.fecha_factura)}</span></td>
-                    <td style={{ ...tblTd, maxWidth: 180 }}><span style={{ ...tblVal, display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{t.concepto ?? <span style={{ color: 'var(--hh-haze)' }}>—</span>}</span></td>
-                    <td style={tblTd}><span style={tblVal}>{t.centro_costo ?? <span style={{ color: 'var(--hh-haze)' }}>—</span>}</span></td>
-                    <td style={tblTd}><EmpresaPill empresa={t.empresa} /></td>
+                  <tr key={t.id}>
+                    <td><span style={{ whiteSpace: 'nowrap' }}>{fmtDate(t.fecha_operacion)}</span></td>
+                    <td style={{ textAlign: 'right' }}><span style={{ fontFamily: 'var(--font-numeric)', fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' }}>{formatCOPFull(t.importe_cop ?? 0)}</span></td>
+                    <td>{t.doc_url && t.no_fac ? <a href={t.doc_url} target="_blank" rel="noopener noreferrer" className="hh-link">{t.no_fac}</a> : <span style={{ color: t.no_fac ? 'var(--hh-teal)' : 'var(--hh-haze)' }}>{t.no_fac ?? 'N/A'}</span>}</td>
+                    <td><span style={{ whiteSpace: 'nowrap' }}>{fmtDate(t.fecha_factura)}</span></td>
+                    <td style={{ maxWidth: 180 }}><span style={{ display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{t.concepto ?? <span style={{ color: 'var(--hh-haze)' }}>—</span>}</span></td>
+                    <td>{t.centro_costo ?? <span style={{ color: 'var(--hh-haze)' }}>—</span>}</td>
+                    <td><EmpresaPill empresa={t.empresa} /></td>
                   </tr>
                 ))}
               </tbody>
               <tfoot>
-                <tr style={{ background: 'var(--hh-dark)' }}>
-                  <td style={{ ...tblTd, fontFamily: 'var(--font-body)', fontWeight: 500, fontSize: '0.8125rem', color: 'var(--hh-ice)', borderBottom: 'none' }}>Total Pagado</td>
-                  <td style={{ ...tblTd, textAlign: 'right', fontFamily: 'var(--font-numeric)', fontVariantNumeric: 'tabular-nums', fontWeight: 600, fontSize: '0.875rem', color: 'var(--hh-ice)', whiteSpace: 'nowrap', borderBottom: 'none' }}>{formatCOPFull(totalPagado)}</td>
-                  <td colSpan={5} style={{ ...tblTd, borderBottom: 'none' }} />
+                <tr>
+                  <td>Total Pagado</td>
+                  <td style={{ textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{formatCOPFull(totalPagado)}</td>
+                  <td colSpan={5} />
                 </tr>
               </tfoot>
             </table>
@@ -3215,26 +3212,26 @@ function GastoTab({ supplierId, nit }: { supplierId: string | null; nit: string 
           </p>
         ) : (
           <div style={{ overflowX: 'auto' }}>
-            <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 800 }}>
+            <table className="hh-table" style={{ minWidth: 800 }}>
               <thead>
-                <tr style={{ borderBottom: '1px solid rgba(122,145,165,0.2)' }}>
-                  {['Fecha Op','Importe','No. Factura','Fecha Factura','Concepto','Centro de Costo','Empresa','Vencimiento','Aprobado',''].map(h => <th key={h} style={tblTh}>{h}</th>)}
+                <tr>
+                  {['Fecha Op','Importe','No. Factura','Fecha Factura','Concepto','Centro de Costo','Empresa','Vencimiento','Aprobado',''].map(h => <th key={h}>{h}</th>)}
                 </tr>
               </thead>
               <tbody>
                 {cpp.map((c, i) => {
                   const isOverdue = c.fecha_vencimiento != null && c.fecha_vencimiento < today
                   return (
-                    <tr key={c.id} style={{ background: i % 2 === 1 ? 'var(--hh-ice)' : 'var(--hh-white)' }}>
-                      <td style={tblTd}><span style={{ ...tblVal, whiteSpace: 'nowrap' }}>{fmtDate(c.fecha_operacion)}</span></td>
-                      <td style={{ ...tblTd, textAlign: 'right' }}><span style={{ ...tblVal, fontFamily: 'var(--font-numeric)', fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' }}>{formatCOPFull(c.importe_cop ?? 0)}</span></td>
-                      <td style={tblTd}>{c.doc_url && c.no_fac ? <a href={c.doc_url} target="_blank" rel="noopener noreferrer" style={{ fontFamily: 'var(--font-body)', fontSize: '0.875rem', color: 'var(--hh-teal)', textDecoration: 'underline' }}>{c.no_fac}</a> : <span style={{ fontFamily: 'var(--font-body)', fontSize: '0.875rem', color: c.no_fac ? 'var(--hh-teal)' : 'var(--hh-haze)' }}>{c.no_fac ?? 'N/A'}</span>}</td>
-                      <td style={tblTd}><span style={{ ...tblVal, whiteSpace: 'nowrap' }}>{fmtDate(c.fecha_factura)}</span></td>
-                      <td style={{ ...tblTd, maxWidth: 180 }}><span style={{ ...tblVal, display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{c.concepto ?? <span style={{ color: 'var(--hh-haze)' }}>—</span>}</span></td>
-                      <td style={tblTd}><span style={tblVal}>{c.centro_costo ?? <span style={{ color: 'var(--hh-haze)' }}>—</span>}</span></td>
-                      <td style={tblTd}><EmpresaPill empresa={c.empresa} /></td>
-                      <td style={tblTd}><span style={{ fontFamily: 'var(--font-body)', fontSize: '0.875rem', fontWeight: isOverdue ? 500 : 400, color: isOverdue ? '#dc3545' : 'var(--hh-dark)', whiteSpace: 'nowrap' }}>{fmtDate(c.fecha_vencimiento)}</span></td>
-                      <td style={tblTd}>
+                    <tr key={c.id}>
+                      <td><span style={{ whiteSpace: 'nowrap' }}>{fmtDate(c.fecha_operacion)}</span></td>
+                      <td style={{ textAlign: 'right' }}><span style={{ fontFamily: 'var(--font-numeric)', fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' }}>{formatCOPFull(c.importe_cop ?? 0)}</span></td>
+                      <td>{c.doc_url && c.no_fac ? <a href={c.doc_url} target="_blank" rel="noopener noreferrer" className="hh-link">{c.no_fac}</a> : <span style={{ color: c.no_fac ? 'var(--hh-teal)' : 'var(--hh-haze)' }}>{c.no_fac ?? 'N/A'}</span>}</td>
+                      <td><span style={{ whiteSpace: 'nowrap' }}>{fmtDate(c.fecha_factura)}</span></td>
+                      <td style={{ maxWidth: 180 }}><span style={{ display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{c.concepto ?? <span style={{ color: 'var(--hh-haze)' }}>—</span>}</span></td>
+                      <td>{c.centro_costo ?? <span style={{ color: 'var(--hh-haze)' }}>—</span>}</td>
+                      <td><EmpresaPill empresa={c.empresa} /></td>
+                      <td><span style={{ fontWeight: isOverdue ? 600 : undefined, color: isOverdue ? '#dc3545' : undefined, whiteSpace: 'nowrap' }}>{fmtDate(c.fecha_vencimiento)}</span></td>
+                      <td>
                         <span style={{
                           display: 'inline-block', padding: '2px 8px', borderRadius: 99,
                           fontFamily: 'var(--font-body)', fontWeight: 500, fontSize: '0.75rem',
@@ -3244,7 +3241,7 @@ function GastoTab({ supplierId, nit }: { supplierId: string | null; nit: string 
                           {c.aprobado === 'SI' ? 'Sí' : 'No'}
                         </span>
                       </td>
-                      <td style={{ ...tblTd, whiteSpace: 'nowrap' }}>
+                      <td style={{ whiteSpace: 'nowrap' }}>
                         {c.aprobado !== 'SI' && rowIndexMap.has(`${Math.round(c.importe_cop ?? 0)}|${c.fecha_vencimiento ?? ''}|${c.empresa ?? ''}`) && (
                           <button
                             onClick={() => handleApproveCpp(c)}
@@ -3576,27 +3573,3 @@ const primaryBtnStyle: React.CSSProperties = {
   cursor: 'pointer',
 }
 
-const retThStyle: React.CSSProperties = {
-  fontFamily: 'var(--font-body)',
-  fontWeight: 500,
-  fontSize: '0.6875rem',
-  textTransform: 'uppercase',
-  letterSpacing: '0.1em',
-  color: 'var(--hh-teal)',
-  padding: '8px 12px',
-  textAlign: 'left',
-  whiteSpace: 'nowrap',
-}
-
-const retTdStyle: React.CSSProperties = {
-  padding: '8px 12px',
-  borderBottom: '1px solid rgba(122,145,165,0.08)',
-  verticalAlign: 'middle',
-}
-
-const retValStyle: React.CSSProperties = {
-  fontFamily: 'var(--font-body)',
-  fontWeight: 400,
-  fontSize: '0.875rem',
-  color: 'var(--hh-dark)',
-}

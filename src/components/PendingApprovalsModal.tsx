@@ -311,9 +311,9 @@ export function PendingApprovalsModal({ onClose, onApproved }: Props) {
             ) : visible.length === 0 ? (
               <div style={emptyStyle}>No hay facturas pendientes para este mes.</div>
             ) : (
-              <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-                <thead style={{ position: 'sticky', top: 0, background: 'var(--hh-white)', zIndex: 1 }}>
-                  <tr style={{ borderBottom: '1px solid rgba(122,145,165,0.2)' }}>
+              <table className="hh-table">
+                <thead style={{ position: 'sticky', top: 0, zIndex: 1 }}>
+                  <tr>
                     <Th>Proveedor</Th>
                     <Th>Empresa</Th>
                     <Th>Concepto</Th>
@@ -328,7 +328,6 @@ export function PendingApprovalsModal({ onClose, onApproved }: Props) {
                     <tr
                       key={row.absoluteRowIndex}
                       style={{
-                        background: idx % 2 === 1 ? 'var(--hh-ice)' : 'var(--hh-white)',
                         borderLeft: row.highlight === 'red'
                           ? '3px solid var(--hh-mango)'
                           : row.highlight === 'amber'
@@ -483,16 +482,7 @@ export function PendingApprovalsModal({ onClose, onApproved }: Props) {
 
 /* ─── Table sub-components ───────────────────────────────── */
 
-const thBase: React.CSSProperties = {
-  fontFamily: 'var(--font-body)',
-  fontWeight: 500,
-  fontSize: '0.6875rem',
-  textTransform: 'uppercase',
-  letterSpacing: '0.12em',
-  color: 'var(--hh-haze)',
-  padding: '11px 16px',
-  whiteSpace: 'nowrap',
-}
+const thBase: React.CSSProperties = {}
 
 function Th({ children, right, center }: { children: React.ReactNode; right?: boolean; center?: boolean }) {
   return (
@@ -503,12 +493,7 @@ function Th({ children, right, center }: { children: React.ReactNode; right?: bo
 }
 
 const tdBase: React.CSSProperties = {
-  fontFamily: 'var(--font-body)',
-  fontWeight: 400,
-  fontSize: '0.875rem',
   color: 'var(--hh-dark)',
-  padding: '10px 16px',
-  borderBottom: '1px solid rgba(122,145,165,0.08)',
 }
 
 function Td({ children, right, center, truncate, mono, overdue }: {

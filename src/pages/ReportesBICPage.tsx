@@ -26,12 +26,11 @@ function downloadCSV(filename: string, headers: string[], rows: (string | number
 function ExportBtn({ onClick, title = 'Descargar Excel' }: { onClick: () => void; title?: string }) {
   return (
     <button onClick={onClick} title={title} style={{
-      display: 'inline-flex', alignItems: 'center', gap: 4,
-      padding: '3px 10px', borderRadius: 6, border: '1px solid rgba(122,145,165,0.25)',
-      background: 'transparent', cursor: 'pointer', color: 'var(--hh-haze)',
-      fontFamily: 'var(--font-body)', fontSize: '0.7rem', fontWeight: 400,
+      background: '#EEF1F4', border: 'none', color: '#566778', fontSize: '11px',
+      padding: '3px 9px', borderRadius: '3px', cursor: 'pointer',
+      fontFamily: "'DM Sans', system-ui, sans-serif", whiteSpace: 'nowrap', flexShrink: 0,
     }}>
-      ↓ xlsx
+      ↓ XLSX
     </button>
   )
 }
@@ -163,17 +162,12 @@ async function fetchAllSpend(): Promise<SpendRow[]> {
 
 function SupplierList({ rows, showScore }: { rows: SupplierRow[]; showScore: boolean }) {
   return (
-    <table style={{ width: '100%', borderCollapse: 'collapse', marginTop: 8 }}>
+    <table className="hh-table" style={{ marginTop: 8 }}>
       <tbody>
         {rows.map(r => (
-          <tr key={r.supplier_id} style={{ borderBottom: '1px solid rgba(122,145,165,0.07)' }}>
+          <tr key={r.supplier_id}>
             <td style={{ padding: '7px 0', fontSize: '0.8125rem' }}>
-              <Link
-                to={`/suppliers/${r.supplier_id}`}
-                style={{ color: 'var(--hh-dark)', textDecoration: 'none', fontWeight: 400 }}
-                onMouseEnter={e => { (e.currentTarget as HTMLElement).style.color = 'var(--hh-teal)' }}
-                onMouseLeave={e => { (e.currentTarget as HTMLElement).style.color = 'var(--hh-dark)' }}
-              >
+              <Link to={`/suppliers/${r.supplier_id}`} className="hh-link">
                 {r.name}
               </Link>
             </td>
@@ -225,40 +219,28 @@ function AssessmentGroup({
   )
 }
 
-function BoolCard({ label, b, color, csvPrefix }: { label: string; b: BoolBucket; color: string; csvPrefix: string }) {
-  const yesSpend = sumSpend(b.yes)
-  const noSpend  = sumSpend(b.no)
-
-  const exportBool = () => {
-    const headers = ['Proveedor', 'NIT', 'Gasto', label, 'URL']
+function BoolSection({ label, b, sectionColor, csvPrefix }: {
+  label: string; b: BoolBucket; sectionColor: string; csvPrefix: string
+}) {
+  const exportAll = () => {
+    const headers = ['Proveedor', 'NIT', 'Gasto', label]
     const rows = [
-      ...b.yes.map(r => [r.name, r.nit, Math.round(r.total), 'Sí', `${window.location.origin}/suppliers/${r.supplier_id}`]),
-      ...b.no.map(r => [r.name, r.nit, Math.round(r.total), 'No', `${window.location.origin}/suppliers/${r.supplier_id}`]),
-      ...b.unknown.map(r => [r.name, r.nit, Math.round(r.total), '', `${window.location.origin}/suppliers/${r.supplier_id}`]),
+      ...b.yes.map(r => [r.name, r.nit, Math.round(r.total), 'Sí']),
+      ...b.no.map(r => [r.name, r.nit, Math.round(r.total), 'No']),
+      ...b.unknown.map(r => [r.name, r.nit, Math.round(r.total), '']),
     ]
     downloadCSV(`${csvPrefix}-${label.replace(/[^a-zA-Z0-9]/g, '_')}.csv`, headers, rows)
   }
-
   return (
-    <div style={{ background: 'white', borderRadius: 10, border: '1px solid rgba(122,145,165,0.15)', padding: '14px 18px', flex: '1 1 200px' }}>
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
-        <span style={{ fontSize: '0.65rem', color: 'var(--hh-haze)', textTransform: 'uppercase', letterSpacing: '0.06em', fontWeight: 500 }}>
-          {label}
-        </span>
-        <ExportBtn onClick={exportBool} />
+    <div style={{ background: 'white', borderRadius: 12, border: '1px solid rgba(122,145,165,0.15)', overflow: 'hidden' }}>
+      <div style={{ background: sectionColor, padding: '10px 20px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+        <span style={{ fontSize: '0.7rem', fontWeight: 600, color: 'white', textTransform: 'uppercase', letterSpacing: '0.08em' }}>{label}</span>
+        <ExportBtn onClick={exportAll} />
       </div>
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-        {([['Sí', b.yes, yesSpend], ['No', b.no, noSpend]] as [string, SupplierRow[], number][]).map(([lbl, rows, spend]) => (
-          <div key={lbl} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <span style={{ minWidth: 22, fontSize: '0.75rem', fontWeight: 600, color: lbl === 'Sí' ? color : 'var(--hh-haze)' }}>{lbl}</span>
-            <span style={{ fontFamily: 'var(--font-numeric)', fontWeight: 500, fontSize: '0.9rem', color: 'var(--hh-dark)' }}>{rows.length}</span>
-            <span style={{ fontSize: '0.75rem', color: 'var(--hh-haze)' }}>prov.</span>
-            <span style={{ marginLeft: 'auto', fontFamily: 'var(--font-numeric)', fontSize: '0.8rem', color: 'var(--hh-dark)' }}>{fmt(spend)}</span>
-          </div>
-        ))}
-        {b.unknown.length > 0 && (
-          <div style={{ fontSize: '0.75rem', color: 'var(--hh-haze)', marginTop: 2 }}>{b.unknown.length} sin dato</div>
-        )}
+      <div style={{ padding: '0 20px' }}>
+        <AssessmentGroup label="Sí"       rows={b.yes}     color={sectionColor}           showScore={false} csvPrefix={`${csvPrefix}-si`} />
+        <AssessmentGroup label="No"       rows={b.no}      color="var(--hh-haze)"         showScore={false} csvPrefix={`${csvPrefix}-no`} />
+        <AssessmentGroup label="Sin dato" rows={b.unknown} color="rgba(122,145,165,0.45)" showScore={false} csvPrefix={`${csvPrefix}-nd`} />
       </div>
     </div>
   )
@@ -273,19 +255,19 @@ function BigSpendersCard({ rows, year, color, textColor, csvPrefix }: {
       <button
         onClick={() => setOpen(o => !o)}
         style={{
-          display: 'flex', alignItems: 'center', width: '100%', padding: '14px 20px',
-          background: 'none', border: 'none', cursor: 'pointer', gap: 10, textAlign: 'left',
+          display: 'flex', alignItems: 'center', width: '100%', padding: '10px 20px',
+          background: color, border: 'none', cursor: 'pointer', gap: 10, textAlign: 'left',
         }}
       >
-        <span style={{ fontSize: '0.65rem', fontWeight: 600, color: 'var(--hh-haze)', textTransform: 'uppercase', letterSpacing: '0.07em', flex: 1 }}>
+        <span style={{ fontSize: '0.7rem', fontWeight: 600, color: textColor, textTransform: 'uppercase', letterSpacing: '0.08em', flex: 1 }}>
           Proveedores &gt; $12M · {year}
         </span>
         {rows.length > 0 && (
-          <span style={{ background: color, color: textColor, borderRadius: 10, padding: '1px 8px', fontSize: '0.65rem', fontWeight: 500 }}>
+          <span style={{ background: 'rgba(255,255,255,0.25)', color: textColor, borderRadius: 10, padding: '1px 8px', fontSize: '0.65rem', fontWeight: 500 }}>
             {rows.length}
           </span>
         )}
-        <span style={{ color: 'var(--hh-haze)', fontSize: '0.7rem', marginLeft: 4 }}>{open ? '▲' : '▼'}</span>
+        <span style={{ color: textColor, opacity: 0.7, fontSize: '0.7rem', marginLeft: 4 }}>{open ? '▲' : '▼'}</span>
       </button>
       {open && (
         <div style={{ padding: '0 20px 16px' }}>
@@ -343,7 +325,7 @@ export function ReportesBICPage() {
       try {
         const rows = await fetchAllSpend()
         setSpendRows(rows)
-        await loadSuppliers([...new Set(rows.map(r => r.supplier_id))])
+        await loadSuppliers([...new Set(rows.map(r => r.supplier_id).filter(Boolean))])
       } catch (err) {
         setFetchError(err instanceof Error ? err.message : 'Error')
       } finally {
@@ -419,10 +401,6 @@ export function ReportesBICPage() {
   const yd = yearDataList.find(y => y.year === activeYear)
   const csvPrefix = `BIC-${currentGroup.label}-${activeYear}`
 
-  const SH: React.CSSProperties = {
-    fontSize: '0.65rem', fontWeight: 600, color: 'var(--hh-haze)',
-    textTransform: 'uppercase', letterSpacing: '0.07em',
-  }
 
   const Card = ({ children, style }: { children: React.ReactNode; style?: React.CSSProperties }) => (
     <div style={{ background: 'white', borderRadius: 12, border: '1px solid rgba(122,145,165,0.15)', padding: '16px 20px', ...style }}>
@@ -504,46 +482,40 @@ export function ReportesBICPage() {
               <BigSpendersCard rows={yd.bigSpenders} year={yd.year} color={currentGroup.color} textColor={currentGroup.textColor} csvPrefix={csvPrefix} />
 
               {/* Assessment */}
-              <Card>
-                <div style={{ ...SH, marginBottom: 4 }}>Evaluación BIC</div>
-                <AssessmentGroup label="Aprobado (≥ 60%)"    rows={yd.assessed.passed} color="var(--hh-teal)"  showScore defaultOpen={yd.assessed.passed.length > 0} csvPrefix={csvPrefix} />
-                <AssessmentGroup label="No aprobado (< 60%)" rows={yd.assessed.failed} color="#B9484E"         showScore csvPrefix={csvPrefix} />
-                <AssessmentGroup label="Sin evaluación"       rows={yd.assessed.none}  color="var(--hh-haze)" showScore={false} csvPrefix={csvPrefix} />
-              </Card>
+              <div style={{ background: 'white', borderRadius: 12, border: '1px solid rgba(122,145,165,0.15)', overflow: 'hidden' }}>
+                <div style={{ background: '#3C4A5A', padding: '10px 20px' }}>
+                  <span style={{ fontSize: '0.7rem', fontWeight: 600, color: 'white', textTransform: 'uppercase', letterSpacing: '0.08em' }}>Evaluación BIC</span>
+                </div>
+                <div style={{ padding: '0 20px' }}>
+                  <AssessmentGroup label="Aprobado (≥ 60%)"    rows={yd.assessed.passed} color="var(--hh-teal)"  showScore csvPrefix={csvPrefix} />
+                  <AssessmentGroup label="No aprobado (< 60%)" rows={yd.assessed.failed} color="#B9484E"         showScore csvPrefix={csvPrefix} />
+                  <AssessmentGroup label="Sin evaluación"       rows={yd.assessed.none}  color="var(--hh-haze)" showScore={false} csvPrefix={csvPrefix} />
+                </div>
+              </div>
 
               {/* Location */}
               {yd.byLocation.length > 0 && (
-                <Card>
-                  <div style={{ display: 'flex', alignItems: 'center', marginBottom: 12 }}>
-                    <span style={SH}>Ubicación</span>
-                    <span style={{ marginLeft: 'auto' }}>
-                      <ExportBtn onClick={() => downloadCSV(`${csvPrefix}-ubicacion.csv`,
-                        ['Ubicación', 'Proveedores', 'Gasto Total'],
-                        yd.byLocation.map(b => [b.label, b.rows.length, Math.round(sumSpend(b.rows))])
-                      )} />
-                    </span>
+                <div style={{ background: 'white', borderRadius: 12, border: '1px solid rgba(122,145,165,0.15)', overflow: 'hidden' }}>
+                  <div style={{ background: '#2D6A9F', padding: '10px 20px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                    <span style={{ fontSize: '0.7rem', fontWeight: 600, color: 'white', textTransform: 'uppercase', letterSpacing: '0.08em' }}>Ubicación</span>
+                    <ExportBtn onClick={() => downloadCSV(`${csvPrefix}-ubicacion.csv`,
+                      ['Ubicación', 'Proveedores', 'Gasto Total'],
+                      yd.byLocation.map(b => [b.label, b.rows.length, Math.round(sumSpend(b.rows))])
+                    )} />
                   </div>
-                  <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-                    <tbody>
-                      {yd.byLocation.map(b => (
-                        <tr key={b.label} style={{ borderBottom: '1px solid rgba(122,145,165,0.07)' }}>
-                          <td style={{ padding: '8px 0', fontSize: '0.8125rem', color: 'var(--hh-dark)' }}>{b.label}</td>
-                          <td style={{ padding: '8px 12px', fontSize: '0.8125rem', color: 'var(--hh-haze)', fontFamily: 'var(--font-numeric)' }}>{b.rows.length} prov.</td>
-                          <td style={{ padding: '8px 0', fontSize: '0.8125rem', fontFamily: 'var(--font-numeric)', textAlign: 'right', color: 'var(--hh-dark)' }}>{fmt(sumSpend(b.rows))}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </Card>
+                  <div style={{ padding: '0 20px' }}>
+                    {yd.byLocation.map(b => (
+                      <AssessmentGroup key={b.label} label={b.label} rows={b.rows} color="#2D6A9F" showScore={false} csvPrefix={`${csvPrefix}-ub`} />
+                    ))}
+                  </div>
+                </div>
               )}
 
               {/* Boolean breakdowns */}
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12 }}>
-                <BoolCard label="Proveedor independiente" b={yd.independent}  color={currentGroup.color} csvPrefix={csvPrefix} />
-                <BoolCard label="Proveedor en desventaja" b={yd.underserved}  color={currentGroup.color} csvPrefix={csvPrefix} />
-                <BoolCard label="Menos de 50 empleados"  b={yd.smallCompany} color={currentGroup.color} csvPrefix={csvPrefix} />
-                <BoolCard label="Empresa minoría"         b={yd.minoria}      color={currentGroup.color} csvPrefix={csvPrefix} />
-              </div>
+              <BoolSection label="Proveedor independiente" b={yd.independent}  sectionColor="#3D9A7A" csvPrefix={csvPrefix} />
+              <BoolSection label="Proveedor en desventaja" b={yd.underserved}  sectionColor="#C07030" csvPrefix={csvPrefix} />
+              <BoolSection label="Menos de 50 empleados"  b={yd.smallCompany} sectionColor="#7055A5" csvPrefix={csvPrefix} />
+              <BoolSection label="Empresa minoría"         b={yd.minoria}      sectionColor="#A83E65" csvPrefix={csvPrefix} />
 
             </div>
           )}

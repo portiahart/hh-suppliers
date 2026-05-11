@@ -1,5 +1,3 @@
-import { DownloadIcon } from '@radix-ui/react-icons';
-
 interface Props {
   onClick: () => void;
   style?: React.CSSProperties;
@@ -8,26 +6,23 @@ interface Props {
 export function ExcelDownloadButton({ onClick, style }: Props) {
   return (
     <button
+      type="button"
       onClick={onClick}
-      title="Descargar Excel"
       style={{
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        width: 28,
-        height: 28,
-        borderRadius: 4,
-        border: '1px solid rgba(74,155,142,0.35)',
-        background: 'none',
+        background: '#EEF1F4',
+        border: 'none',
+        color: '#566778',
+        fontSize: '11px',
+        padding: '3px 9px',
+        borderRadius: '3px',
         cursor: 'pointer',
-        color: '#4A9B8E',
+        fontFamily: "'DM Sans', system-ui, sans-serif",
+        whiteSpace: 'nowrap',
         flexShrink: 0,
         ...style,
       }}
-      onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.background = 'rgba(74,155,142,0.08)' }}
-      onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.background = 'none' }}
     >
-      <DownloadIcon width={14} height={14} />
+      ↓ XLSX
     </button>
   );
 }

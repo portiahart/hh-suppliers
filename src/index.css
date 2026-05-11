@@ -46,6 +46,50 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 
+/* ── HH Table Standard — mirrors /ab-cuentas design ── */
+.hh-table { width: 100%; border-collapse: collapse; }
+.hh-table thead th {
+  font-family: 'DM Sans', system-ui, sans-serif;
+  font-weight: 600;
+  font-size: 0.6rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: #1F2D3D;
+  background: #F2F5F8;
+  padding: 7px 8px;
+  border-bottom: 2px solid #D0D8E0;
+  white-space: nowrap;
+  vertical-align: middle;
+}
+.hh-table tbody tr:nth-child(odd) { background: #FFFFFF; }
+.hh-table tbody tr:nth-child(even) { background: #F2F5F8; }
+.hh-table tbody tr:hover { background: rgba(74,155,142,0.06); }
+.hh-table td {
+  padding: 7px 8px;
+  font-size: 0.75rem;
+  font-family: 'DM Sans', system-ui, sans-serif;
+  vertical-align: middle;
+  border-bottom: 1px solid #EEF1F4;
+}
+.hh-table tfoot td {
+  padding: 8px;
+  font-size: 0.75rem;
+  font-weight: 700;
+  font-family: 'DM Sans', system-ui, sans-serif;
+  border-top: 2px solid #1F2D3D;
+  border-bottom: none;
+  background: #FFFFFF;
+}
+.hh-table tfoot tr:hover { background: #FFFFFF; }
+.hh-link {
+  color: #4A9B8E;
+  text-decoration: underline;
+  font-size: 11px;
+  font-family: 'DM Sans', system-ui, sans-serif;
+  cursor: pointer;
+}
+.hh-link:hover { color: #276221; }
+
 @keyframes spin {
   to { transform: rotate(360deg); }
 }
