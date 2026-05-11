@@ -65,8 +65,10 @@ CREATE INDEX IF NOT EXISTS cxp_proveedor_idx  ON cxp_facturas(proveedor);
 
 ALTER TABLE cxp_facturas ENABLE ROW LEVEL SECURITY;
 
-CREATE POLICY "cxp_select" ON cxp_facturas
-  FOR SELECT TO authenticated USING (true);
+DO $$ BEGIN
+  CREATE POLICY "cxp_select" ON cxp_facturas FOR SELECT TO authenticated USING (true);
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 
-CREATE POLICY "cxp_write" ON cxp_facturas
-  FOR ALL TO authenticated USING (true) WITH CHECK (true);
+DO $$ BEGIN
+  CREATE POLICY "cxp_write" ON cxp_facturas FOR ALL TO authenticated USING (true) WITH CHECK (true);
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
