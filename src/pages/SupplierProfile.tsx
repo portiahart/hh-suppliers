@@ -1414,6 +1414,7 @@ interface BankingData {
 type BankingDraft = Omit<BankingData, 'id' | 'supplier_id' | 'verificado_at' | 'verificado_por'>
 
 function BancarioTab({ supplierId, prefill, onPrefillConsumed }: { supplierId: string | null; prefill?: BankingFields | null; onPrefillConsumed?: () => void }) {
+  const { session } = useAuth()
   const [data, setData] = useState<BankingData | null>(null)
   const [loading, setLoading] = useState(true)
   const [editing, setEditing] = useState(false)
@@ -1423,10 +1424,99 @@ function BancarioTab({ supplierId, prefill, onPrefillConsumed }: { supplierId: s
     nombre_beneficiario: null, banco: null, tipo_cuenta: null,
     numero_cuenta: null, tipo_documento_bancolombia: null, verificacion_notas: null,
   })
+  const [certDocs, setCertDocs] = useState<DocRow[]>([])
+  const [certLoading, setCertLoading] = useState(true)
+  const [certUploadFile, setCertUploadFile] = useState<File | null>(null)
+  const [certUploading, setCertUploading] = useState(false)
+  const [certExtractingId, setCertExtractingId] = useState<string | null>(null)
+  const [certDeletingId, setCertDeletingId] = useState<string | null>(null)
 
   const showToast = (msg: string) => {
     setToast(msg)
     setTimeout(() => setToast(null), 3500)
+  }
+
+  const fetchCertDocs = async () => {
+    if (!supplierId) return
+    const { data } = await supabase
+      .from('suppliers_documents')
+      .select('*')
+      .eq('supplier_id', supplierId)
+      .eq('document_type', 'Certificado Bancario')
+      .order('id', { ascending: false })
+    setCertDocs((data as DocRow[]) ?? [])
+    setCertLoading(false)
+  }
+
+  const handleCertUpload = async () => {
+    if (!supplierId || !certUploadFile) return
+    if (!ACCEPTED_MIME.includes(certUploadFile.type)) {
+      showToast('Tipo de archivo no permitido. Use PDF, JPG, PNG o WEBP.')
+      return
+    }
+    if (certUploadFile.size > MAX_BYTES) { showToast('El archivo supera el límite de 10 MB.'); return }
+    setCertUploading(true)
+    const slugify = (s: string) => s.normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^a-zA-Z0-9._-]/g, '_')
+    const ts = Date.now()
+    const storagePath = `${supplierId}/Certificado_Bancario/${ts}_${slugify(certUploadFile.name)}`
+    const { error: uploadErr } = await supabase.storage.from('supplier-documents').upload(storagePath, certUploadFile)
+    if (uploadErr) { setCertUploading(false); showToast(`Error al subir: ${uploadErr.message}`); return }
+    const { error: dbErr } = await supabase.from('suppliers_documents').insert({
+      supplier_id: supplierId, document_type: 'Certificado Bancario',
+      storage_path: storagePath, file_name: certUploadFile.name,
+      file_size_bytes: certUploadFile.size, mime_type: certUploadFile.type,
+      uploaded_by: session?.user?.id ?? null,
+    })
+    setCertUploading(false)
+    if (dbErr) { showToast(`Error al registrar: ${dbErr.message}`); return }
+    setCertUploadFile(null)
+    const inp = document.getElementById('cert-file-input') as HTMLInputElement | null
+    if (inp) inp.value = ''
+    showToast('Certificado subido correctamente.')
+    void fetchCertDocs()
+  }
+
+  const handleCertExtract = async (doc: DocRow) => {
+    setCertExtractingId(doc.id)
+    try {
+      const { data: urlData, error: urlErr } = await supabase.storage
+        .from('supplier-documents').createSignedUrl(doc.storage_path, 120)
+      if (urlErr || !urlData?.signedUrl) throw new Error('No se pudo generar enlace.')
+      const { data: res, error: fnErr } = await supabase.functions.invoke('extract-banking', {
+        body: { url: urlData.signedUrl },
+      })
+      if (fnErr || !res?.success) throw new Error(fnErr?.message ?? res?.error ?? 'Error al extraer.')
+      const fields = res.fields as BankingFields
+      setDraft(d => ({
+        nombre_beneficiario: fields.nombre_beneficiario ?? d.nombre_beneficiario,
+        banco:               fields.banco               ?? d.banco,
+        tipo_cuenta:         fields.tipo_cuenta          ?? d.tipo_cuenta,
+        numero_cuenta:       fields.numero_cuenta        ?? d.numero_cuenta,
+        tipo_documento_bancolombia: fields.tipo_documento_bancolombia ?? d.tipo_documento_bancolombia,
+        verificacion_notas:  d.verificacion_notas,
+      }))
+      setEditing(true)
+      showToast('Datos extraídos — revisa y guarda.')
+    } catch (e) {
+      showToast(e instanceof Error ? e.message : 'Error al extraer datos bancarios.')
+    }
+    setCertExtractingId(null)
+  }
+
+  const handleCertDownload = async (doc: DocRow) => {
+    const { data, error } = await supabase.storage.from('supplier-documents').createSignedUrl(doc.storage_path, 60)
+    if (error || !data?.signedUrl) { showToast('Error al generar enlace.'); return }
+    window.open(data.signedUrl, '_blank')
+  }
+
+  const handleCertDelete = async (doc: DocRow) => {
+    setCertDeletingId(doc.id)
+    const { error: storageErr } = await supabase.storage.from('supplier-documents').remove([doc.storage_path])
+    if (storageErr) { setCertDeletingId(null); showToast('Error al eliminar.'); return }
+    await supabase.from('suppliers_documents').delete().eq('id', doc.id)
+    setCertDeletingId(null)
+    showToast('Certificado eliminado.')
+    void fetchCertDocs()
   }
 
   useEffect(() => {
@@ -1440,6 +1530,7 @@ function BancarioTab({ supplierId, prefill, onPrefillConsumed }: { supplierId: s
       setData((row as BankingData) ?? null)
       setLoading(false)
     })()
+    void fetchCertDocs()
   }, [supplierId])
 
   useEffect(() => {
@@ -1601,6 +1692,68 @@ function BancarioTab({ supplierId, prefill, onPrefillConsumed }: { supplierId: s
               </div>
 
 
+            </div>
+          )}
+        </SectionCard>
+
+        {/* Certificado Bancario documents */}
+        <SectionCard title="Certificado Bancario">
+          {certLoading ? (
+            <SkeletonFields />
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+              {certDocs.length === 0 ? (
+                <p style={{ fontFamily: 'var(--font-body)', fontWeight: 300, fontStyle: 'italic', fontSize: '0.875rem', color: 'var(--hh-haze)', margin: 0 }}>
+                  No hay certificados subidos aún.
+                </p>
+              ) : certDocs.map(doc => (
+                <div key={doc.id} style={{
+                  display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                  gap: 12, flexWrap: 'wrap', padding: '10px 14px',
+                  background: 'var(--hh-ice)', borderRadius: 6,
+                }}>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <p style={{ fontFamily: 'var(--font-body)', fontWeight: 500, fontSize: '0.875rem', color: 'var(--hh-dark)', margin: '0 0 2px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      {doc.file_name}
+                    </p>
+                  </div>
+                  <div style={{ display: 'flex', gap: 8, flexShrink: 0 }}>
+                    <button
+                      onClick={() => handleCertExtract(doc)}
+                      disabled={certExtractingId === doc.id}
+                      style={{ ...ghostBtnStyle, color: 'var(--hh-teal)', borderColor: 'var(--hh-teal)' }}
+                    >
+                      {certExtractingId === doc.id ? 'Extrayendo…' : 'Extraer datos'}
+                    </button>
+                    <button onClick={() => handleCertDownload(doc)} style={ghostBtnStyle}>Descargar</button>
+                    <button
+                      onClick={() => handleCertDelete(doc)}
+                      disabled={certDeletingId === doc.id}
+                      style={{ ...ghostBtnStyle, color: '#B9484E', borderColor: 'rgba(185,72,78,0.3)' }}
+                    >
+                      {certDeletingId === doc.id ? '…' : 'Eliminar'}
+                    </button>
+                  </div>
+                </div>
+              ))}
+
+              {/* Upload widget */}
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 4, flexWrap: 'wrap' }}>
+                <input
+                  id="cert-file-input"
+                  type="file"
+                  accept=".pdf,.jpg,.jpeg,.png,.webp"
+                  onChange={e => setCertUploadFile(e.target.files?.[0] ?? null)}
+                  style={{ fontFamily: 'var(--font-body)', fontSize: '0.8125rem', flex: 1, minWidth: 0 }}
+                />
+                <button
+                  onClick={handleCertUpload}
+                  disabled={!certUploadFile || certUploading}
+                  style={{ ...primaryBtnStyle, opacity: (!certUploadFile || certUploading) ? 0.5 : 1 }}
+                >
+                  {certUploading ? 'Subiendo…' : 'Subir'}
+                </button>
+              </div>
             </div>
           )}
         </SectionCard>
