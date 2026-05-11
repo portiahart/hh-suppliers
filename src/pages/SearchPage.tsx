@@ -1,17 +1,8 @@
-import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
+import { useState, useEffect, useRef, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
-import {
-  MagnifyingGlassIcon,
-  CheckCircledIcon,
-  ClockIcon,
-  ExclamationTriangleIcon,
-  Cross2Icon,
-} from '@radix-ui/react-icons'
+import { MagnifyingGlassIcon } from '@radix-ui/react-icons'
 import { supabase, suppliersQuery } from '../lib/supabase'
 import type { Supplier } from '../types/supplier'
-import { PendingApprovalsModal } from '../components/PendingApprovalsModal'
-import { ExcelDownloadButton } from '../components/ExcelDownloadButton'
-import { exportTableToExcel } from '../lib/export-utils'
 
 /* ─── Types ──────────────────────────────────────────────── */
 
@@ -23,28 +14,11 @@ interface TopSupplierRow {
   entities: Array<{ entity: string; amount_cop: number }>
 }
 
-interface CppInvoice {
-  importe_cop: string | number
-  aprobado: string | null
-  fecha_vencimiento: string | null
-  proveedor: string | null
-  empresa: string | null
-  empresa_split: Array<{ code: string; pct: number; importe_cop_allocated?: number }> | null
-  concepto: string | null
-  centro_costo: string | null
-}
-
 type TxRow = {
   nit: string | null
   importe_cop: string | number
   empresa: string | null
   empresa_split: Array<{ code: string; pct: number; importe_cop_allocated: number }> | null
-}
-
-interface CardData {
-  count: number
-  total: number
-  rows: CppInvoice[]
 }
 
 const ENTITY_COLORS: Record<string, { bg: string; text: string }> = {
@@ -83,21 +57,6 @@ function supplierDisplayName(razonSocial: string | null | undefined, nombreOpera
   return nombreOperativo && nombreOperativo !== legal ? `${legal} (${nombreOperativo})` : legal
 }
 
-function matchesCompany(r: CppInvoice | TxRow, company: string | null): boolean {
-  if (!company) return true
-  if (r.empresa?.toUpperCase() === company) return true
-  if (r.empresa_split?.some(s => s.code.toUpperCase() === company)) return true
-  return false
-}
-
-function allocatedAmount(r: CppInvoice | TxRow, company: string | null): number {
-  const full = Number(r.importe_cop ?? 0)
-  if (!company || !r.empresa_split) return full
-  const split = r.empresa_split.find(s => s.code.toUpperCase() === company)
-  if (!split) return full
-  return Number(split.importe_cop_allocated) || full * split.pct
-}
-
 /* ─── SearchPage ─────────────────────────────────────────── */
 
 export function SearchPage() {
@@ -111,66 +70,16 @@ export function SearchPage() {
   const searchRef = useRef<HTMLDivElement>(null)
   const debouncedQuery = useDebounce(query, 250)
 
-  // Company filter
-  const [selectedCompany, setSelectedCompany] = useState<string | null>(null)
-
   // Raw fetched data
-  const [allCpp, setAllCpp] = useState<CppInvoice[]>([])
   const [allTx, setAllTx]   = useState<TxRow[]>([])
 
   // Loading/error
-  const [cardLoading, setCardLoading] = useState(true)
-  const [cardError, setCardError]     = useState(false)
   const [loadingTop, setLoadingTop]   = useState(true)
   const [topError, setTopError]       = useState(false)
-
-  // Modal
-  const [modalData, setModalData] = useState<{ title: string; rows: CppInvoice[] } | null>(null)
-  const [showPendingModal, setShowPendingModal] = useState(false)
 
   // Top 20 results (async)
   const [topSuppliers, setTopSuppliers] = useState<TopSupplierRow[]>([])
   const [assessments, setAssessments]   = useState<Map<string, boolean | null>>(new Map())
-
-  // Available companies (derived from CPP data)
-  const availableCompanies = useMemo(() => {
-    const codes = new Set<string>()
-    for (const r of allCpp) {
-      if (r.empresa) codes.add(r.empresa.toUpperCase())
-      if (r.empresa_split) r.empresa_split.forEach(s => codes.add(s.code.toUpperCase()))
-    }
-    const order = Object.keys(ENTITY_COLORS)
-    return Array.from(codes).sort((a, b) => {
-      const ia = order.indexOf(a)
-      const ib = order.indexOf(b)
-      return (ia === -1 ? 999 : ia) - (ib === -1 ? 999 : ib)
-    })
-  }, [allCpp])
-
-  // Card data derived from allCpp + selectedCompany
-  const today = useMemo(() => new Date().toISOString().slice(0, 10), [])
-
-  const aprobadas = useMemo<CardData>(() => {
-    const rows = allCpp.filter(r => r.aprobado?.toUpperCase() === 'SI' && matchesCompany(r, selectedCompany))
-    return { count: rows.length, total: rows.reduce((s, r) => s + allocatedAmount(r, selectedCompany), 0), rows }
-  }, [allCpp, selectedCompany])
-
-  const pendientes = useMemo<CardData>(() => {
-    const now = new Date()
-    const endOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999)
-    const rows = allCpp.filter(r => {
-      if (r.aprobado?.toUpperCase() === 'SI') return false
-      if (!matchesCompany(r, selectedCompany)) return false
-      if (!r.fecha_vencimiento) return false
-      return new Date(r.fecha_vencimiento) <= endOfMonth
-    })
-    return { count: rows.length, total: rows.reduce((s, r) => s + allocatedAmount(r, selectedCompany), 0), rows }
-  }, [allCpp, selectedCompany])
-
-  const vencidas = useMemo<CardData>(() => {
-    const rows = allCpp.filter(r => r.fecha_vencimiento && r.fecha_vencimiento < today && matchesCompany(r, selectedCompany))
-    return { count: rows.length, total: rows.reduce((s, r) => s + allocatedAmount(r, selectedCompany), 0), rows }
-  }, [allCpp, selectedCompany, today])
 
   /* ── Typeahead search ─────────────────────────────────── */
   useEffect(() => {
@@ -208,28 +117,6 @@ export function SearchPage() {
     return () => document.removeEventListener('mousedown', handler)
   }, [])
 
-  /* ── Fetch CPP rows — stored raw; cards derived via useMemo ── */
-  const fetchCards = useCallback(async () => {
-    setCardLoading(true)
-    setCardError(false)
-    const PAGE = 1000
-    const all: CppInvoice[] = []
-    for (let from = 0; ; from += PAGE) {
-      const { data, error } = await supabase
-        .from('cuentas_por_pagar_cache')
-        .select('importe_cop, aprobado, fecha_vencimiento, proveedor, empresa, empresa_split, concepto, centro_costo')
-        .range(from, from + PAGE - 1)
-      if (error) { setCardError(true); setCardLoading(false); return }
-      if (!data || data.length === 0) break
-      all.push(...(data as unknown as CppInvoice[]))
-      if (data.length < PAGE) break
-    }
-    setAllCpp(all)
-    setCardLoading(false)
-  }, [])
-
-  useEffect(() => { void fetchCards() }, [fetchCards])
-
   /* ── Fetch TX rows — stored raw; Top 20 recomputed on filter change ── */
   const fetchAllTx = useCallback(async () => {
     const cutoff = new Date()
@@ -254,15 +141,14 @@ export function SearchPage() {
 
   useEffect(() => { void fetchAllTx() }, [fetchAllTx])
 
-  const computeTop20 = useCallback(async (txRows: TxRow[], company: string | null) => {
+  const computeTop20 = useCallback(async (txRows: TxRow[]) => {
     setLoadingTop(true)
     setTopError(false)
 
-    // Group by NIT with optional company filter
     const grouped = new Map<string, { total: number; entityTotals: Map<string, number> }>()
     for (const r of txRows) {
-      if (!r.nit || !matchesCompany(r, company)) continue
-      const amount = allocatedAmount(r, company)
+      if (!r.nit) continue
+      const amount = Number(r.importe_cop ?? 0)
       if (!amount) continue
 
       const g = grouped.get(r.nit) ?? { total: 0, entityTotals: new Map() }
@@ -330,8 +216,8 @@ export function SearchPage() {
 
   useEffect(() => {
     if (allTx.length === 0) return
-    void computeTop20(allTx, selectedCompany)
-  }, [allTx, selectedCompany, computeTop20])
+    void computeTop20(allTx)
+  }, [allTx, computeTop20])
 
   /* ── Render ───────────────────────────────────────────── */
   return (
@@ -430,18 +316,6 @@ export function SearchPage() {
           )}
         </div>
 
-        {/* Company filter */}
-        {!cardLoading && availableCompanies.length > 0 && (
-          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
-            <CompanyToggle label="Todas" active={selectedCompany === null} color={null}
-              onClick={() => setSelectedCompany(null)} />
-            {availableCompanies.map(code => (
-              <CompanyToggle key={code} label={code} active={selectedCompany === code}
-                color={ENTITY_COLORS[code] ?? null}
-                onClick={() => setSelectedCompany(selectedCompany === code ? null : code)} />
-            ))}
-          </div>
-        )}
         </div>{/* end flex row */}
 
         {/* Sub-hint */}
@@ -467,61 +341,7 @@ export function SearchPage() {
         </p>
       </section>
 
-      {/* ── Section 2: Action cards ──────────────────────── */}
-      <section>
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 16 }}>
-          <ActionCard
-            icon={<CheckCircledIcon width={20} height={20} />}
-            title="Facturas Aprobadas"
-            accent="var(--hh-teal)"
-            amountColor="var(--hh-teal)"
-            loading={cardLoading}
-            error={cardError}
-            data={aprobadas}
-            onAmountClick={() => aprobadas && setModalData({ title: 'Facturas Aprobadas', rows: aprobadas.rows })}
-          />
-          <ActionCard
-            icon={<ClockIcon width={20} height={20} />}
-            title="Facturas Pendiente Aprobación"
-            accent="var(--hh-lemon)"
-            amountColor="var(--hh-teal)"
-            loading={cardLoading}
-            error={cardError}
-            data={pendientes}
-            onAmountClick={() => setShowPendingModal(true)}
-          />
-          <ActionCard
-            icon={<ExclamationTriangleIcon width={20} height={20} />}
-            title="Cartera Vencida — Facturas por Pagar Urgente"
-            accent="var(--hh-mango)"
-            amountColor="var(--hh-mango)"
-            loading={cardLoading}
-            error={cardError}
-            data={vencidas}
-            onAmountClick={() => vencidas && setModalData({ title: 'Cartera Vencida', rows: vencidas.rows })}
-          />
-        </div>
-      </section>
-
-      {/* ── Invoice modal ────────────────────────────────── */}
-      {modalData && (
-        <InvoiceModal
-          title={modalData.title}
-          rows={modalData.rows}
-          onClose={() => setModalData(null)}
-        />
-      )}
-
-
-      {/* ── Pending approvals modal ──────────────────────── */}
-      {showPendingModal && (
-        <PendingApprovalsModal
-          onClose={() => setShowPendingModal(false)}
-          onApproved={() => void fetchCards()}
-        />
-      )}
-
-      {/* ── Section 3: Top 20 ───────────────────────────── */}
+      {/* ── Section 2: Top 20 ───────────────────────────── */}
       <section>
         <h2 style={sectionHeadingStyle}>Top 20 · Últimos 60 días</h2>
 
@@ -559,7 +379,7 @@ export function SearchPage() {
                   </td>
                 </tr>
               ) : (
-                topSuppliers.map((row, idx) => {
+                topSuppliers.map((row) => {
                   const assessment = assessments.has(row.id) ? assessments.get(row.id) : undefined
                   return (
                     <tr
@@ -693,99 +513,6 @@ function EntityPill({ entity, amount }: { entity: string; amount: number }) {
   )
 }
 
-const shimmerStyle: React.CSSProperties = {
-  display: 'inline-block',
-  background: 'linear-gradient(90deg, rgba(122,145,165,0.1) 25%, rgba(122,145,165,0.2) 50%, rgba(122,145,165,0.1) 75%)',
-  backgroundSize: '200% 100%',
-  animation: 'shimmer 1.4s infinite',
-  borderRadius: 4,
-}
-
-function ActionCard({
-  icon,
-  title,
-  accent,
-  amountColor,
-  loading,
-  error,
-  data,
-  onAmountClick,
-}: {
-  icon: React.ReactNode
-  title: string
-  accent: string
-  amountColor: string
-  loading: boolean
-  error: boolean
-  data: CardData | null
-  onAmountClick?: () => void
-}) {
-  return (
-    <div
-      style={{
-        background: 'var(--hh-white)',
-        border: '1px solid rgba(122,145,165,0.2)',
-        borderLeft: `4px solid ${accent}`,
-        borderRadius: 8,
-        padding: '20px 24px',
-        display: 'flex',
-        flexDirection: 'column',
-        gap: 12,
-      }}
-    >
-      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-        <span style={{ color: accent, flexShrink: 0 }}>{icon}</span>
-        <span style={{
-          fontFamily: 'var(--font-body)',
-          fontWeight: 500,
-          fontSize: '0.8125rem',
-          color: 'var(--hh-dark)',
-          lineHeight: 1.3,
-        }}>
-          {title}
-        </span>
-      </div>
-
-      {loading ? (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-          <span style={{ ...shimmerStyle, height: 13, width: 80 }} />
-          <span style={{ ...shimmerStyle, height: 18, width: 130 }} />
-        </div>
-      ) : error || !data ? (
-        <p style={{ fontFamily: 'var(--font-body)', fontWeight: 300, fontSize: '0.8125rem', color: 'var(--hh-haze)', margin: 0 }}>
-          Error al cargar
-        </p>
-      ) : (
-        <div>
-          <p style={{ fontFamily: 'var(--font-body)', fontWeight: 400, fontSize: '0.8125rem', color: 'var(--hh-haze)', margin: '0 0 2px' }}>
-            {data.count} {data.count === 1 ? 'factura' : 'facturas'}
-          </p>
-          <button
-            onClick={onAmountClick}
-            style={{
-              background: 'none',
-              border: 'none',
-              padding: 0,
-              margin: 0,
-              fontFamily: 'var(--font-body)',
-              fontWeight: 600,
-              fontSize: '1rem',
-              color: amountColor,
-              fontVariantNumeric: 'tabular-nums',
-              cursor: onAmountClick ? 'pointer' : 'default',
-              textDecoration: onAmountClick ? 'underline' : 'none',
-              textUnderlineOffset: 3,
-              textDecorationColor: `${amountColor}55`,
-            }}
-          >
-            {formatCOP(data.total)}
-          </button>
-        </div>
-      )}
-    </div>
-  )
-}
-
 function Th({ children, align }: { children: React.ReactNode; align: 'left' | 'right' }) {
   return (
     <th style={{ textAlign: align }}>
@@ -846,200 +573,6 @@ function SkeletonRow({ cols, even }: { cols: number; even: boolean }) {
   )
 }
 
-/* ─── Company Toggle ─────────────────────────────────────── */
-
-function CompanyToggle({ label, active, color, onClick }: {
-  label: string
-  active: boolean
-  color: { bg: string; text: string } | null
-  onClick: () => void
-}) {
-  const activeBg   = color?.bg   ?? 'var(--hh-teal)'
-  const activeText = color?.text ?? '#fff'
-  return (
-    <button
-      onClick={onClick}
-      style={{
-        fontFamily: 'var(--font-body)',
-        fontWeight: active ? 500 : 400,
-        fontSize: '0.75rem',
-        letterSpacing: '0.05em',
-        padding: '5px 13px',
-        borderRadius: 99,
-        border: `1px solid ${active ? activeBg : 'rgba(122,145,165,0.3)'}`,
-        background: active ? activeBg : 'transparent',
-        color: active ? activeText : 'var(--hh-haze)',
-        cursor: 'pointer',
-        transition: 'all 0.12s',
-        whiteSpace: 'nowrap',
-      }}
-    >
-      {label}
-    </button>
-  )
-}
-
-/* ─── Invoice Modal ──────────────────────────────────────── */
-
-function InvoiceModal({ title, rows, onClose }: { title: string; rows: CppInvoice[]; onClose: () => void }) {
-  // Close on backdrop click
-  const backdropRef = useRef<HTMLDivElement>(null)
-
-  // Close on Escape
-  useEffect(() => {
-    const handler = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose() }
-    document.addEventListener('keydown', handler)
-    return () => document.removeEventListener('keydown', handler)
-  }, [onClose])
-
-  const sorted = [...rows].sort((a, b) => {
-    const da = a.fecha_vencimiento ?? ''
-    const db = b.fecha_vencimiento ?? ''
-    return da < db ? -1 : da > db ? 1 : 0
-  })
-
-  function companyBadges(row: CppInvoice) {
-    if (row.empresa_split && Array.isArray(row.empresa_split) && row.empresa_split.length > 0) {
-      return row.empresa_split.map(s => s.code)
-    }
-    return row.empresa ? [row.empresa] : []
-  }
-
-  return (
-    <div
-      ref={backdropRef}
-      onClick={e => { if (e.target === backdropRef.current) onClose() }}
-      style={{
-        position: 'fixed', inset: 0,
-        background: 'rgba(15,25,40,0.55)',
-        zIndex: 200,
-        display: 'flex',
-        alignItems: 'flex-start',
-        justifyContent: 'center',
-        padding: '48px 24px',
-        overflowY: 'auto',
-      }}
-    >
-      <div style={{
-        background: 'var(--hh-white)',
-        borderRadius: 10,
-        width: '100%',
-        maxWidth: 860,
-        boxShadow: '0 16px 48px rgba(0,0,0,0.22)',
-        display: 'flex',
-        flexDirection: 'column',
-        maxHeight: 'calc(100vh - 96px)',
-      }}>
-        {/* Header */}
-        <div style={{
-          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-          padding: '20px 24px 16px',
-          borderBottom: '1px solid rgba(122,145,165,0.15)',
-          flexShrink: 0,
-        }}>
-          <div>
-            <h2 style={{ fontFamily: 'var(--font-display)', fontWeight: 300, fontSize: '1.0625rem', color: 'var(--hh-dark)', margin: 0 }}>
-              {title}
-            </h2>
-            <p style={{ fontFamily: 'var(--font-body)', fontWeight: 300, fontSize: '0.8125rem', color: 'var(--hh-haze)', margin: '3px 0 0' }}>
-              {rows.length} {rows.length === 1 ? 'factura' : 'facturas'}
-            </p>
-          </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-            <ExcelDownloadButton onClick={() => exportTableToExcel(sorted, [
-              { field: 'proveedor', header: 'Proveedor' },
-              { field: (r: any) => {
-                if (r.empresa_split && Array.isArray(r.empresa_split) && r.empresa_split.length > 0)
-                  return r.empresa_split.map((s: any) => s.code).join(' | ');
-                return r.empresa || '';
-              }, header: 'Empresa' },
-              { field: 'concepto', header: 'Concepto' },
-              { field: 'centro_costo', header: 'Centro de Costo' },
-              { field: 'fecha_vencimiento', header: 'Vencimiento', type: 'date' as const },
-              { field: 'importe_cop', header: 'Importe', type: 'number' as const },
-            ], 'facturas_pendientes')} />
-            <button
-            onClick={onClose}
-            style={{
-              background: 'none', border: 'none', cursor: 'pointer',
-              color: 'var(--hh-haze)', padding: 4, borderRadius: 4,
-              display: 'flex', alignItems: 'center',
-            }}
-            onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.color = 'var(--hh-dark)' }}
-            onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.color = 'var(--hh-haze)' }}
-          >
-            <Cross2Icon width={18} height={18} />
-          </button>
-          </div>
-        </div>
-
-        {/* Table */}
-        <div style={{ overflowY: 'auto', flexGrow: 1 }}>
-          <table className="hh-table">
-            <thead style={{ position: 'sticky', top: 0, zIndex: 1 }}>
-              <tr>
-                <Th align="left">Proveedor</Th>
-                <Th align="left">Empresa</Th>
-                <Th align="left">Concepto</Th>
-                <Th align="left">Centro de costo</Th>
-                <Th align="right">Vencimiento</Th>
-                <Th align="right">Importe</Th>
-              </tr>
-            </thead>
-            <tbody>
-              {sorted.map((row, idx) => {
-                const badges = companyBadges(row)
-                return (
-                  <tr key={idx} style={{ background: idx % 2 === 1 ? 'var(--hh-ice)' : 'var(--hh-white)' }}>
-                    <td>{row.proveedor ?? '—'}</td>
-                    <td>
-                      <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
-                        {badges.length > 0
-                          ? badges.map(code => <CompactPill key={code} code={code} />)
-                          : <span style={{ color: 'var(--hh-haze)', fontSize: '0.8125rem' }}>—</span>
-                        }
-                      </div>
-                    </td>
-                    <td style={{ maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                      {row.concepto ?? '—'}
-                    </td>
-                    <td>{row.centro_costo ?? '—'}</td>
-                    <td style={{ textAlign: 'right', whiteSpace: 'nowrap', fontVariantNumeric: 'tabular-nums' }}>
-                      {row.fecha_vencimiento ?? '—'}
-                    </td>
-                    <td style={{ textAlign: 'right', fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' }}>
-                      {formatCOP(Number(row.importe_cop ?? 0))}
-                    </td>
-                  </tr>
-                )
-              })}
-            </tbody>
-          </table>
-        </div>
-      </div>
-    </div>
-  )
-}
-
-function CompactPill({ code }: { code: string }) {
-  const upper = code.toUpperCase()
-  const color = ENTITY_COLORS[upper] ?? { bg: 'var(--hh-haze)', text: '#fff' }
-  return (
-    <span style={{
-      display: 'inline-block',
-      padding: '2px 7px',
-      borderRadius: 99,
-      background: color.bg,
-      color: color.text,
-      fontSize: '0.6875rem',
-      fontWeight: 500,
-      letterSpacing: '0.05em',
-    }}>
-      {upper}
-    </span>
-  )
-}
-
 /* ─── Style constants ────────────────────────────────────── */
 
 const pageTitleStyle: React.CSSProperties = {
@@ -1065,15 +598,6 @@ const tableCardStyle: React.CSSProperties = {
   borderRadius: 8,
   border: '1px solid rgba(122,145,165,0.2)',
   overflow: 'hidden',
-}
-
-const tdStyle: React.CSSProperties = {
-  fontFamily: 'var(--font-body)',
-  fontWeight: 400,
-  fontSize: '0.875rem',
-  color: 'var(--hh-dark)',
-  padding: '11px 16px',
-  borderBottom: '1px solid rgba(122,145,165,0.08)',
 }
 
 const dropdownStyle: React.CSSProperties = {

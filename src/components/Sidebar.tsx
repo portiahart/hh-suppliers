@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { Link, NavLink } from 'react-router-dom'
-import { PersonIcon, PlusCircledIcon, HomeIcon, BarChartIcon } from '@radix-ui/react-icons'
+import { PersonIcon, PlusCircledIcon, HomeIcon, BarChartIcon, MixerHorizontalIcon, ArrowDownIcon, ArrowUpIcon } from '@radix-ui/react-icons'
 import { supabase } from '../lib/supabase'
 
 interface SidebarProps {
@@ -124,24 +124,22 @@ export function Sidebar({ isMobile = false, isOpen = false, onClose }: SidebarPr
         {/* Divider */}
         <div style={{ height: 1, background: 'rgba(122,145,165,0.15)', margin: '12px 24px' }} />
 
-        {/* Activos Incompletos section */}
-        <p style={{
-          fontFamily: 'var(--font-body)',
-          fontSize: '0.625rem',
-          fontWeight: 600,
-          letterSpacing: '0.14em',
-          textTransform: 'uppercase',
-          color: 'rgba(122,145,165,0.6)',
-          margin: '0 0 4px',
-          padding: '0 24px',
-        }}>
-          Activos Incompletos
-        </p>
+        <SectionHeader icon={<MixerHorizontalIcon width={20} height={20} />} label="Proveedores Activos & Incompletos" />
         <SubNavItem to="/incompletos/duplicado"    label="Duplicado"         count={counts?.duplicado}      onClick={onClose} />
         <SubNavItem to="/incompletos/tipo-persona" label="Tipo de persona"   count={counts?.['tipo-persona']} onClick={onClose} />
         <SubNavItem to="/incompletos/razon-social" label="Razón Social"      count={counts?.['razon-social']} onClick={onClose} />
         <SubNavItem to="/incompletos/nit"          label="NIT / CC"          count={counts?.nit}            onClick={onClose} />
         <SubNavItem to="/incompletos/rut"          label="RUT presente o no" count={counts?.rut}            onClick={onClose} />
+
+        {/* Divider */}
+        <div style={{ height: 1, background: 'rgba(122,145,165,0.15)', margin: '12px 24px' }} />
+
+        <NavItem to="/cxp" icon={<ArrowDownIcon width={20} height={20} />} label="CxP" onClick={onClose} />
+
+        {/* Divider */}
+        <div style={{ height: 1, background: 'rgba(122,145,165,0.15)', margin: '12px 24px' }} />
+
+        <SectionHeader icon={<ArrowUpIcon width={20} height={20} />} label="CxC" />
       </nav>
     </aside>
   )
@@ -152,6 +150,21 @@ interface NavItemProps {
   icon: React.ReactNode
   label: string
   onClick?: () => void
+}
+
+function SectionHeader({ icon, label }: { icon: React.ReactNode; label: string }) {
+  return (
+    <div style={{
+      display: 'flex', alignItems: 'center', gap: 10,
+      padding: '10px 24px',
+      color: 'var(--hh-haze)', fontFamily: 'var(--font-body)',
+      fontWeight: 400, fontSize: '0.875rem',
+      borderLeft: '2px solid transparent',
+    }}>
+      <span style={{ flexShrink: 0 }}>{icon}</span>
+      {label}
+    </div>
+  )
 }
 
 function NavItem({ to, icon, label, onClick }: NavItemProps) {

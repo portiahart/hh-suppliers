@@ -9,6 +9,7 @@ import { NewSupplierFlow } from './pages/NewSupplierFlow'
 import { SettingsPage } from './pages/SettingsPage'
 import { ReportesBICPage } from './pages/ReportesBICPage'
 import { IncompletosPage } from './pages/IncompletosPage'
+import { CxPPage } from './pages/CxPPage'
 
 export default function App() {
   return (
@@ -29,6 +30,7 @@ export default function App() {
             <Route path="/settings" element={<SettingsPage />} />
             <Route path="/reportes-bic" element={<ReportesBICPage />} />
             <Route path="/incompletos/:category" element={<IncompletosPage />} />
+            <Route path="/cxp" element={<CxPPage />} />
           </Route>
         </Routes>
       </BrowserRouter>

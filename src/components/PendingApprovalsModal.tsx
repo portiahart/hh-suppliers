@@ -324,7 +324,7 @@ export function PendingApprovalsModal({ onClose, onApproved }: Props) {
                   </tr>
                 </thead>
                 <tbody>
-                  {visible.map((row, idx) => (
+                  {visible.map((row) => (
                     <tr
                       key={row.absoluteRowIndex}
                       style={{

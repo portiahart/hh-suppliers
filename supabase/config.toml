@@ -3,3 +3,6 @@ verify_jwt = false
 
 [functions.extract-banking]
 verify_jwt = false
+
+[functions.sync-supplier-to-sheets]
+verify_jwt = false

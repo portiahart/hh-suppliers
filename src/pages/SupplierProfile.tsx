@@ -1313,7 +1313,7 @@ function RetencionesCard({ supplierId, showToast }: { supplierId: string | null;
               </tr>
             </thead>
             <tbody>
-              {(displayRows.length > 0 ? displayRows : RET_PLACEHOLDER_ROWS).map((r, idx) => {
+              {(displayRows.length > 0 ? displayRows : RET_PLACEHOLDER_ROWS).map((r) => {
                 const isPlaceholder = displayRows.length === 0 && !editing
                 return (
                   <tr key={r.id}>
@@ -2539,27 +2539,42 @@ function EvaluacionTab({ supplierId, supplier }: { supplierId: string | null; su
     setSaving(true)
     const score = computeScore(draft)
     const pass = score >= 30
+    const now = new Date().toISOString()
     const payload = {
       supplier_id: supplierId,
       answers: draft,
       total_score: score,
       pass,
-      assessed_at: new Date().toISOString(),
+      assessed_at: now,
       assessed_by: session?.user?.email ?? null,
     }
     if (row?.id) {
       const { data, error } = await supabase
         .from('suppliers_assessment').update(payload).eq('id', row.id).select().single()
-      setSaving(false)
-      if (error) { showToast('Error al guardar la evaluación.'); return }
+      if (error) { setSaving(false); showToast('Error al guardar la evaluación.'); return }
       setRow(data as AssessmentRow)
     } else {
       const { data, error } = await supabase
         .from('suppliers_assessment').insert(payload).select().single()
-      setSaving(false)
-      if (error) { showToast('Error al guardar la evaluación.'); return }
+      if (error) { setSaving(false); showToast('Error al guardar la evaluación.'); return }
       setRow(data as AssessmentRow)
     }
+
+    const yesNo = (key: string, yesLabel = 'Sí') => draft[key] === yesLabel ? 'SI' : 'NO'
+    const bicUpdate = {
+      bic_survey_score: `${Math.round(score / MAX_TOTAL * 100)}%`,
+      bic_ubicacion: draft['q2'] ?? null,
+      bic_categoria: draft['q1'] ?? null,
+      bic_small_company: draft['q3'] === 'Menos de 10' || draft['q3'] === 'Entre 10 y 50' ? 'SI' : 'NO',
+      bic_independent: yesNo('q4'),
+      bic_underserved: draft['q5'] === '0, 1 o 2' ? 'SI' : 'NO',
+      bic_minoria: yesNo('q6'),
+      bic_physical_goods: yesNo('q10'),
+      bic_synced_at: now,
+    }
+    await supabase.from('accounts_suppliers').update(bicUpdate).eq('id', supplierId)
+
+    setSaving(false)
     setEditing(false)
     setDraft({})
     showToast('Evaluación guardada.')
@@ -2590,7 +2605,7 @@ function EvaluacionTab({ supplierId, supplier }: { supplierId: string | null; su
       <div style={{ marginTop: 24 }} />
 
       <SectionCard
-        title="Happy Supplier Test"
+        title="Evaluación Proveedor Feliz (BIC)"
         action={
           !editing ? (
             <button onClick={startEdit} style={ghostBtnStyle}>
@@ -3057,7 +3072,7 @@ function GastoTab({ supplierId, nit }: { supplierId: string | null; nit: string 
                   </tr>
                 </thead>
                 <tbody>
-                  {retRows.map((r, i) => (
+                  {retRows.map((r) => (
                     <tr key={r.label}>
                       <td style={{ fontWeight: 500 }}>{r.label}</td>
                       <td style={{ fontVariantNumeric: 'tabular-nums', color: r.total > 0 ? 'var(--hh-dark)' : 'var(--hh-haze)' }}>
@@ -3115,7 +3130,7 @@ function GastoTab({ supplierId, nit }: { supplierId: string | null; nit: string 
                 </tr>
               </thead>
               <tbody>
-                {txns.map((t, i) => (
+                {txns.map((t) => (
                   <tr key={t.id}>
                     <td><span style={{ whiteSpace: 'nowrap' }}>{fmtDate(t.fecha_operacion)}</span></td>
                     <td><span style={{ whiteSpace: 'nowrap' }}>{fmtDate(t.fecha_factura)}</span></td>
@@ -3163,7 +3178,7 @@ function GastoTab({ supplierId, nit }: { supplierId: string | null; nit: string 
                 </tr>
               </thead>
               <tbody>
-                {txns.map((t, i) => (
+                {txns.map((t) => (
                   <tr key={t.id}>
                     <td><span style={{ whiteSpace: 'nowrap' }}>{fmtDate(t.fecha_operacion)}</span></td>
                     <td style={{ textAlign: 'right' }}><span style={{ fontFamily: 'var(--font-numeric)', fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' }}>{formatCOPFull(t.importe_cop ?? 0)}</span></td>
@@ -3219,7 +3234,7 @@ function GastoTab({ supplierId, nit }: { supplierId: string | null; nit: string 
                 </tr>
               </thead>
               <tbody>
-                {cpp.map((c, i) => {
+                {cpp.map((c) => {
                   const isOverdue = c.fecha_vencimiento != null && c.fecha_vencimiento < today
                   return (
                     <tr key={c.id}>
