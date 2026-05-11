@@ -1,8 +1,11 @@
+-- Enable extensions (no-op if already enabled)
+CREATE EXTENSION IF NOT EXISTS pg_cron;
+CREATE EXTENSION IF NOT EXISTS pg_net;
+
 -- Add sheet_row_num so approve-cxp can write back to the correct sheet row
 ALTER TABLE cxp_facturas ADD COLUMN IF NOT EXISTS sheet_row_num integer;
 
--- Schedule sync-cxp every 10 minutes via pg_cron + pg_net
--- Requires pg_cron and pg_net extensions (enable in Supabase Dashboard → Database → Extensions if needed)
+-- Schedule sync-cxp every 10 minutes
 SELECT cron.schedule(
   'sync-cxp-every-10min',
   '*/10 * * * *',
