@@ -1,5 +1,7 @@
+import { useState, useEffect } from 'react'
 import { Link, NavLink } from 'react-router-dom'
 import { PersonIcon, PlusCircledIcon, HomeIcon, BarChartIcon } from '@radix-ui/react-icons'
+import { supabase } from '../lib/supabase'
 
 interface SidebarProps {
   isMobile?: boolean
@@ -7,7 +9,65 @@ interface SidebarProps {
   onClose?: () => void
 }
 
+type Counts = {
+  duplicado: number
+  'tipo-persona': number
+  'razon-social': number
+  nit: number
+  rut: number
+}
+
 export function Sidebar({ isMobile = false, isOpen = false, onClose }: SidebarProps) {
+  const [counts, setCounts] = useState<Counts | null>(null)
+
+  useEffect(() => {
+    void (async () => {
+      // Active supplier IDs: any spend recorded in 2025 or 2026
+      const { data: spendRows } = await supabase
+        .from('suppliers_spend_monthly')
+        .select('supplier_id')
+        .in('year', [2025, 2026])
+      const activeIds = new Set((spendRows ?? []).map(r => (r as { supplier_id: string }).supplier_id))
+      if (activeIds.size === 0) return
+
+      const countActive = (ids: string[]) => ids.filter(id => activeIds.has(id)).length
+
+      const [noTipo, noRazon, noNit, allSupp, rutDocs, allRS] = await Promise.all([
+        supabase.from('accounts_suppliers').select('id').is('archived_at', null).is('tipo_persona', null).limit(10000),
+        supabase.from('accounts_suppliers').select('id').is('archived_at', null).is('razon_social', null).limit(10000),
+        supabase.from('accounts_suppliers').select('id').is('archived_at', null).is('nit', null).limit(10000),
+        supabase.from('accounts_suppliers').select('id').is('archived_at', null).limit(10000),
+        supabase.from('suppliers_documents').select('supplier_id').eq('document_type', 'RUT'),
+        supabase.from('accounts_suppliers').select('id, razon_social').is('archived_at', null).limit(10000),
+      ])
+
+      const withRut = new Set((rutDocs.data ?? []).map(d => (d as { supplier_id: string }).supplier_id))
+      const noRutIds = (allSupp.data ?? [])
+        .map(s => (s as { id: string }).id)
+        .filter(id => !withRut.has(id))
+
+      const seen = new Map<string, string[]>()
+      for (const s of (allRS.data ?? []) as { id: string; razon_social: string | null }[]) {
+        const key = (s.razon_social ?? '').trim().toLowerCase()
+        if (!key) continue
+        if (!seen.has(key)) seen.set(key, [])
+        seen.get(key)!.push(s.id)
+      }
+      const dupeIds: string[] = []
+      for (const ids of seen.values()) {
+        if (ids.length > 1) dupeIds.push(...ids)
+      }
+
+      setCounts({
+        duplicado:      countActive(dupeIds),
+        'tipo-persona': countActive((noTipo.data ?? []).map(s => (s as { id: string }).id)),
+        'razon-social': countActive((noRazon.data ?? []).map(s => (s as { id: string }).id)),
+        nit:            countActive((noNit.data ?? []).map(s => (s as { id: string }).id)),
+        rut:            countActive(noRutIds),
+      })
+    })()
+  }, [])
+
   return (
     <aside
       style={{
@@ -26,7 +86,7 @@ export function Sidebar({ isMobile = false, isOpen = false, onClose }: SidebarPr
         transition: 'transform 0.25s ease',
       }}
     >
-      {/* Logo (→ corazon.portiahart.com) + Home icon */}
+      {/* Logo */}
       <div style={{ padding: '28px 24px 24px', display: 'flex', alignItems: 'center', gap: 10 }}>
         <a
           href="https://corazon.portiahart.com"
@@ -64,7 +124,7 @@ export function Sidebar({ isMobile = false, isOpen = false, onClose }: SidebarPr
         {/* Divider */}
         <div style={{ height: 1, background: 'rgba(122,145,165,0.15)', margin: '12px 24px' }} />
 
-        {/* Incompletos section */}
+        {/* Activos Incompletos section */}
         <p style={{
           fontFamily: 'var(--font-body)',
           fontSize: '0.625rem',
@@ -75,13 +135,13 @@ export function Sidebar({ isMobile = false, isOpen = false, onClose }: SidebarPr
           margin: '0 0 4px',
           padding: '0 24px',
         }}>
-          Incompletos
+          Activos Incompletos
         </p>
-        <SubNavItem to="/incompletos/duplicado"    label="Duplicado"         onClick={onClose} />
-        <SubNavItem to="/incompletos/tipo-persona" label="Tipo de persona"   onClick={onClose} />
-        <SubNavItem to="/incompletos/razon-social" label="Razón Social"      onClick={onClose} />
-        <SubNavItem to="/incompletos/nit"          label="NIT / CC"          onClick={onClose} />
-        <SubNavItem to="/incompletos/rut"          label="RUT presente o no" onClick={onClose} />
+        <SubNavItem to="/incompletos/duplicado"    label="Duplicado"         count={counts?.duplicado}      onClick={onClose} />
+        <SubNavItem to="/incompletos/tipo-persona" label="Tipo de persona"   count={counts?.['tipo-persona']} onClick={onClose} />
+        <SubNavItem to="/incompletos/razon-social" label="Razón Social"      count={counts?.['razon-social']} onClick={onClose} />
+        <SubNavItem to="/incompletos/nit"          label="NIT / CC"          count={counts?.nit}            onClick={onClose} />
+        <SubNavItem to="/incompletos/rut"          label="RUT presente o no" count={counts?.rut}            onClick={onClose} />
       </nav>
     </aside>
   )
@@ -121,13 +181,15 @@ function NavItem({ to, icon, label, onClick }: NavItemProps) {
   )
 }
 
-function SubNavItem({ to, label, onClick }: { to: string; label: string; onClick?: () => void }) {
+function SubNavItem({ to, label, count, onClick }: { to: string; label: string; count?: number; onClick?: () => void }) {
   return (
     <NavLink
       to={to}
       onClick={onClick}
       style={({ isActive }) => ({
-        display: 'block',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'space-between',
         padding: '7px 24px 7px 32px',
         textDecoration: 'none',
         color: isActive ? 'var(--hh-teal)' : 'rgba(122,145,165,0.75)',
@@ -139,7 +201,21 @@ function SubNavItem({ to, label, onClick }: { to: string; label: string; onClick
         transition: 'color 0.15s ease',
       })}
     >
-      {label}
+      <span>{label}</span>
+      {count !== undefined && (
+        <span style={{
+          fontSize: '0.6875rem',
+          color: 'rgba(122,145,165,0.55)',
+          background: 'rgba(122,145,165,0.12)',
+          borderRadius: 10,
+          padding: '1px 6px',
+          marginLeft: 6,
+          flexShrink: 0,
+          fontVariantNumeric: 'tabular-nums',
+        }}>
+          {count}
+        </span>
+      )}
     </NavLink>
   )
 }

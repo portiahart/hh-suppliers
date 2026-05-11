@@ -25,11 +25,11 @@ const CATEGORY_LABELS: Record<Category, string> = {
 }
 
 const CATEGORY_DESCRIPTIONS: Record<Category, string> = {
-  'duplicado':    'Proveedores con razón social idéntica a otro registro.',
-  'tipo-persona': 'Proveedores sin tipo de persona (Jurídica / Natural) registrado.',
-  'razon-social': 'Proveedores sin razón social registrada.',
-  'nit':          'Proveedores sin NIT o cédula registrada.',
-  'rut':          'Proveedores que no tienen un RUT subido en documentos.',
+  'duplicado':    'Proveedores activos (con pagos en los últimos 12 meses) con razón social idéntica a otro registro.',
+  'tipo-persona': 'Proveedores activos sin tipo de persona (Jurídica / Natural) registrado.',
+  'razon-social': 'Proveedores activos sin razón social registrada.',
+  'nit':          'Proveedores activos sin NIT o cédula registrada.',
+  'rut':          'Proveedores activos que no tienen un RUT subido en documentos.',
 }
 
 export function IncompletosPage() {
@@ -56,22 +56,31 @@ export function IncompletosPage() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [cat])
 
+  async function getActiveIds(): Promise<Set<string>> {
+    const { data } = await supabase
+      .from('suppliers_spend_monthly')
+      .select('supplier_id')
+      .in('year', [2025, 2026])
+    return new Set((data ?? []).map(r => (r as { supplier_id: string }).supplier_id))
+  }
+
   async function load() {
+    const activeIds = await getActiveIds()
     if (cat === 'duplicado') {
-      await loadDuplicates()
+      await loadDuplicates(activeIds)
     } else if (cat === 'tipo-persona') {
-      await loadSimple('tipo_persona', true)
+      await loadSimple('tipo_persona', true, activeIds)
     } else if (cat === 'razon-social') {
-      await loadSimple('razon_social', true)
+      await loadSimple('razon_social', true, activeIds)
     } else if (cat === 'nit') {
-      await loadSimple('nit', true)
+      await loadSimple('nit', true, activeIds)
     } else if (cat === 'rut') {
-      await loadMissingRut()
+      await loadMissingRut(activeIds)
     }
     setLoading(false)
   }
 
-  async function loadSimple(column: string, mustBeNull: boolean) {
+  async function loadSimple(column: string, mustBeNull: boolean, activeIds: Set<string>) {
     const all: IncompleteSupplier[] = []
     let from = 0
     while (true) {
@@ -87,10 +96,10 @@ export function IncompletosPage() {
       if (page.length < 1000) break
       from += 1000
     }
-    setSuppliers(all)
+    setSuppliers(all.filter(s => activeIds.has(s.id)))
   }
 
-  async function loadDuplicates() {
+  async function loadDuplicates(activeIds: Set<string>) {
     const all: DuplicateSupplier[] = []
     let from = 0
     while (true) {
@@ -116,10 +125,10 @@ export function IncompletosPage() {
       if (list.length > 1) groups.push({ key, suppliers: list })
     }
     groups.sort((a, b) => a.key.localeCompare(b.key, 'es'))
-    setDuplicateGroups(groups)
+    setDuplicateGroups(groups.map(g => ({ ...g, suppliers: g.suppliers.filter(s => activeIds.has(s.id)) })).filter(g => g.suppliers.length > 1))
   }
 
-  async function loadMissingRut() {
+  async function loadMissingRut(activeIds: Set<string>) {
     // Fetch all non-archived suppliers
     const all: IncompleteSupplier[] = []
     let from = 0
@@ -143,7 +152,7 @@ export function IncompletosPage() {
     const withRut = new Set((docs ?? []).map((d: { supplier_id: string }) => d.supplier_id))
 
     const missing = all
-      .filter(s => !withRut.has(s.id))
+      .filter(s => !withRut.has(s.id) && activeIds.has(s.id))
       .sort((a, b) => (a.razon_social ?? '').localeCompare(b.razon_social ?? '', 'es'))
     setSuppliers(missing)
   }
@@ -198,7 +207,7 @@ export function IncompletosPage() {
           textTransform: 'uppercase', letterSpacing: '0.12em',
           color: 'var(--hh-haze)', margin: '0 0 6px',
         }}>
-          Incompletos
+          Activos Incompletos
         </p>
         <h1 style={{
           fontFamily: 'var(--font-display)', fontWeight: 300, fontSize: '1.75rem',
