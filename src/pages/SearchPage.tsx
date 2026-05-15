@@ -18,7 +18,6 @@ type TxRow = {
   nit: string | null
   importe_cop: string | number
   empresa: string | null
-  empresa_split: Array<{ code: string; pct: number; importe_cop_allocated: number }> | null
 }
 
 const ENTITY_COLORS: Record<string, { bg: string; text: string }> = {
@@ -117,7 +116,7 @@ export function SearchPage() {
     return () => document.removeEventListener('mousedown', handler)
   }, [])
 
-  /* ── Fetch TX rows — stored raw; Top 20 recomputed on filter change ── */
+  /* ── Fetch TX rows from accounts_bancos (Banco Colombia payments) ── */
   const fetchAllTx = useCallback(async () => {
     const cutoff = new Date()
     cutoff.setDate(cutoff.getDate() - 60)
@@ -126,9 +125,9 @@ export function SearchPage() {
     const all: TxRow[] = []
     for (let from = 0; ; from += PAGE) {
       const { data, error } = await supabase
-        .from('transactions_cache')
-        .select('nit, importe_cop, empresa, empresa_split')
-        .gte('fecha_factura', cutoffStr)
+        .from('accounts_bancos')
+        .select('nit, importe_cop, empresa')
+        .gte('fecha_operacion', cutoffStr)
         .not('nit', 'is', null)
         .range(from, from + PAGE - 1)
       if (error) { setTopError(true); setLoadingTop(false); return }
@@ -154,14 +153,8 @@ export function SearchPage() {
       const g = grouped.get(r.nit) ?? { total: 0, entityTotals: new Map() }
       g.total += amount
 
-      // Entity totals for pills always show full allocation
       if (r.empresa) {
-        g.entityTotals.set(r.empresa, (g.entityTotals.get(r.empresa) ?? 0) + Number(r.importe_cop ?? 0))
-      } else if (r.empresa_split) {
-        for (const s of r.empresa_split) {
-          const alloc = Number(s.importe_cop_allocated) || Number(r.importe_cop ?? 0) * s.pct
-          g.entityTotals.set(s.code, (g.entityTotals.get(s.code) ?? 0) + alloc)
-        }
+        g.entityTotals.set(r.empresa, (g.entityTotals.get(r.empresa) ?? 0) + amount)
       }
 
       grouped.set(r.nit, g)
@@ -343,7 +336,12 @@ export function SearchPage() {
 
       {/* ── Section 2: Top 20 ───────────────────────────── */}
       <section>
-        <h2 style={sectionHeadingStyle}>Top 20 · Últimos 60 días</h2>
+        <h2 style={sectionHeadingStyle}>
+          Top 20 · Últimos 60 días
+          <span style={{ marginLeft: 10, fontSize: '0.75rem', fontWeight: 400, color: 'var(--hh-haze)', fontFamily: 'var(--font-body)', fontStyle: 'normal' }}>
+            pagos via Banco Colombia
+          </span>
+        </h2>
 
         <div style={tableCardStyle}>
           <table className="hh-table">

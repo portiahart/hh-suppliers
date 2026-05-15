@@ -2770,7 +2770,6 @@ function EvaluacionTab({ supplierId, supplier }: { supplierId: string | null; su
 
 interface TxRow {
   id: string
-  source: string
   fecha_operacion: string | null
   fecha_factura: string | null
   proveedor: string | null
@@ -2784,21 +2783,19 @@ interface TxRow {
   concepto: string | null
   centro_costo: string | null
   empresa: string | null
-  no_fac: string | null
+  no_factura: string | null
   doc_url: string | null
 }
 
 interface CppRow {
   id: string
-  fecha_operacion: string | null
   fecha_factura: string | null
   fecha_vencimiento: string | null
   nit: string | null
-  importe_cop: number | null
+  valor_total: number | null
   concepto: string | null
-  centro_costo: string | null
   empresa: string | null
-  no_fac: string | null
+  no_factura: string | null
   doc_url: string | null
   aprobado: string | null
 }
@@ -2850,7 +2847,6 @@ function GastoTab({ supplierId, nit }: { supplierId: string | null; nit: string 
   const [expanded, setExpanded] = useState<Set<string>>(new Set())
   const [toast, setToast] = useState<string | null>(null)
   const [userRole, setUserRole] = useState('general_manager')
-  const [rowIndexMap, setRowIndexMap] = useState<Map<string, number>>(new Map())
   const [approvingId, setApprovingId] = useState<string | null>(null)
 
   const showToast = (msg: string) => { setToast(msg); setTimeout(() => setToast(null), 3500) }
@@ -2869,50 +2865,21 @@ function GastoTab({ supplierId, nit }: { supplierId: string | null; nit: string 
     if (!nit) { setTxLoading(false); return }
     void (async () => {
       const [{ data: txData }, { data: cppData }] = await Promise.all([
-        supabase.from('transactions_cache').select('*').eq('nit', nit).order('fecha_operacion', { ascending: false }).limit(10000),
-        supabase.from('cuentas_por_pagar_cache').select('*').eq('nit', nit).order('fecha_operacion', { ascending: false }).limit(10000),
+        supabase.from('accounts_bancos')
+          .select('id, fecha_operacion, fecha_factura, proveedor, nit, importe_cop, monto_base, total_iva, total_ipc, rete_fuente, rete_ica, concepto, centro_costo, empresa, no_factura, doc_url')
+          .eq('nit', nit)
+          .order('fecha_operacion', { ascending: false })
+          .limit(10000),
+        supabase.from('cxp_facturas')
+          .select('id, fecha_factura, fecha_vencimiento, nit, valor_total, concepto, empresa, no_factura, doc_url, aprobado')
+          .eq('nit', nit)
+          .eq('pagado', 'POR PAGAR')
+          .order('fecha_vencimiento', { ascending: true, nullsFirst: false })
+          .limit(10000),
       ])
       setTxns((txData as TxRow[]) ?? [])
-      const cppRows = (cppData as CppRow[]) ?? []
-      setCpp(cppRows)
+      setCpp((cppData as CppRow[]) ?? [])
       setTxLoading(false)
-
-      // Build sheet row index map for unapproved CPP rows
-      const unapproved = cppRows.filter(r => r.aprobado !== 'SI')
-      if (unapproved.length === 0) return
-      try {
-        const { data: sheetData } = await supabase.functions.invoke('get-reporte-data', {
-          body: { ranges: ['xPP'] },
-        })
-        if (!sheetData?.success) return
-        const xppRows: unknown[][] = sheetData.ranges?.['xPP'] ?? []
-        const xppStartRow: number = sheetData.xppStartRow || 1
-        const map = new Map<string, number>()
-        xppRows.forEach((row, i) => {
-          const r = row as unknown[]
-          const sheetCell = (idx: number) => { const v = r[idx]; return v == null ? '' : String(v).trim() }
-          // Parse fecha_vencimiento (col 25) — may be a Sheets serial number or ISO string
-          const rawVenc = r[25]
-          let fechaVenc = ''
-          if (typeof rawVenc === 'number') {
-            const d = new Date((rawVenc - 25569) * 86400 * 1000)
-            if (!isNaN(d.getTime())) fechaVenc = d.toISOString().slice(0, 10)
-          } else if (typeof rawVenc === 'string' && rawVenc.trim()) {
-            const d = new Date(rawVenc.trim())
-            if (!isNaN(d.getTime())) fechaVenc = d.toISOString().slice(0, 10)
-          }
-          // Parse importe (col 6)
-          const rawAmt = r[6]
-          const importe = typeof rawAmt === 'number'
-            ? rawAmt
-            : parseFloat(String(rawAmt ?? '').replace(/[^0-9.-]/g, '')) || 0
-          const key = `${Math.round(importe)}|${fechaVenc}|${sheetCell(24)}`
-          map.set(key, xppStartRow + i)
-        })
-        setRowIndexMap(map)
-      } catch {
-        // silently fail — approve buttons won't appear
-      }
     })()
   }, [nit])
 
@@ -2959,15 +2926,10 @@ function GastoTab({ supplierId, nit }: { supplierId: string | null; nit: string 
   // ─── Approve CPP row ───
   const handleApproveCpp = async (c: CppRow) => {
     if (!session?.user?.id) return
-    const key = `${Math.round(c.importe_cop ?? 0)}|${c.fecha_vencimiento ?? ''}|${c.empresa ?? ''}`
-    const rowIndex = rowIndexMap.get(key)
-    if (!rowIndex) { showToast('No se encontró la fila en la hoja. Recarga e intenta de nuevo.'); return }
     setApprovingId(c.id)
     try {
-      const { data, error } = await supabase.functions.invoke('update-xpp', {
-        body: { action: 'approve', rowIndex, value: true, userId: session.user.id, userRole },
-      })
-      if (error || !data?.success) throw new Error(data?.error || 'Error')
+      const { error } = await supabase.from('cxp_facturas').update({ aprobado: 'SI' }).eq('id', c.id)
+      if (error) throw error
       setCpp(prev => prev.map(r => r.id === c.id ? { ...r, aprobado: 'SI' } : r))
       showToast('Factura aprobada.')
     } catch {
@@ -3109,8 +3071,8 @@ function GastoTab({ supplierId, nit }: { supplierId: string | null; nit: string 
               { field: 'centro_costo', header: 'Clasificación' },
               { field: 'importe_cop', header: 'Importe COP', type: 'number' as const },
               { field: (t: any) => t.empresa || '', header: 'Empresa' },
-              { field: (t: any) => t.source === 'CASHAPP' ? 'Cash App' : 'Banco', header: 'Fuente' },
-              { field: 'no_fac', header: 'No. Factura' },
+              { field: () => 'Banco Colombia', header: 'Fuente' },
+              { field: 'no_factura', header: 'No. Factura' },
             ];
             if (hasLinks) cols.push({ field: (t: any) => t.doc_url || '', header: 'URL Factura' });
             exportTableToExcel(txns, cols, 'transacciones');
@@ -3138,8 +3100,8 @@ function GastoTab({ supplierId, nit }: { supplierId: string | null; nit: string 
                     <td><span style={{ whiteSpace: 'nowrap' }}>{t.centro_costo ?? <span style={{ color: 'var(--hh-haze)' }}>—</span>}</span></td>
                     <td style={{ textAlign: 'right' }}><span style={{ fontFamily: 'var(--font-numeric)', fontVariantNumeric: 'tabular-nums', color: 'var(--hh-mango)', whiteSpace: 'nowrap' }}>{formatCOPFull(t.importe_cop ?? 0)}</span></td>
                     <td><EmpresaPill empresa={t.empresa} /></td>
-                    <td>{t.source === 'CASHAPP' ? 'Cash App' : 'Banco'}</td>
-                    <td>{t.doc_url && t.no_fac ? <a href={t.doc_url} target="_blank" rel="noopener noreferrer" className="hh-link">{t.no_fac}</a> : <span style={{ color: t.no_fac ? 'var(--hh-teal)' : 'var(--hh-haze)' }}>{t.no_fac ?? 'N/A'}</span>}</td>
+                    <td>Banco Colombia</td>
+                    <td>{t.doc_url && t.no_factura ? <a href={t.doc_url} target="_blank" rel="noopener noreferrer" className="hh-link">{t.no_factura}</a> : <span style={{ color: t.no_factura ? 'var(--hh-teal)' : 'var(--hh-haze)' }}>{t.no_factura ?? 'N/A'}</span>}</td>
                   </tr>
                 ))}
               </tbody>
@@ -3155,7 +3117,7 @@ function GastoTab({ supplierId, nit }: { supplierId: string | null; nit: string 
           const cols: any[] = [
             { field: 'fecha_operacion', header: 'Fecha Op.', type: 'date' as const },
             { field: 'importe_cop', header: 'Importe COP', type: 'number' as const },
-            { field: 'no_fac', header: 'No. Factura' },
+            { field: 'no_factura', header: 'No. Factura' },
             { field: 'fecha_factura', header: 'Fecha Factura', type: 'date' as const },
             { field: 'concepto', header: 'Concepto' },
             { field: 'centro_costo', header: 'Centro de Costo' },
@@ -3182,7 +3144,7 @@ function GastoTab({ supplierId, nit }: { supplierId: string | null; nit: string 
                   <tr key={t.id}>
                     <td><span style={{ whiteSpace: 'nowrap' }}>{fmtDate(t.fecha_operacion)}</span></td>
                     <td style={{ textAlign: 'right' }}><span style={{ fontFamily: 'var(--font-numeric)', fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' }}>{formatCOPFull(t.importe_cop ?? 0)}</span></td>
-                    <td>{t.doc_url && t.no_fac ? <a href={t.doc_url} target="_blank" rel="noopener noreferrer" className="hh-link">{t.no_fac}</a> : <span style={{ color: t.no_fac ? 'var(--hh-teal)' : 'var(--hh-haze)' }}>{t.no_fac ?? 'N/A'}</span>}</td>
+                    <td>{t.doc_url && t.no_factura ? <a href={t.doc_url} target="_blank" rel="noopener noreferrer" className="hh-link">{t.no_factura}</a> : <span style={{ color: t.no_factura ? 'var(--hh-teal)' : 'var(--hh-haze)' }}>{t.no_factura ?? 'N/A'}</span>}</td>
                     <td><span style={{ whiteSpace: 'nowrap' }}>{fmtDate(t.fecha_factura)}</span></td>
                     <td style={{ maxWidth: 180 }}><span style={{ display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{t.concepto ?? <span style={{ color: 'var(--hh-haze)' }}>—</span>}</span></td>
                     <td>{t.centro_costo ?? <span style={{ color: 'var(--hh-haze)' }}>—</span>}</td>
@@ -3207,12 +3169,10 @@ function GastoTab({ supplierId, nit }: { supplierId: string | null; nit: string 
         <ExcelDownloadButton onClick={() => {
           const hasLinks = cpp.some((c: any) => c.doc_url);
           const cols: any[] = [
-            { field: 'fecha_operacion', header: 'Fecha Op.', type: 'date' as const },
-            { field: 'importe_cop', header: 'Importe', type: 'number' as const },
-            { field: 'no_fac', header: 'No. Factura' },
             { field: 'fecha_factura', header: 'Fecha Factura', type: 'date' as const },
+            { field: 'valor_total', header: 'Importe', type: 'number' as const },
+            { field: 'no_factura', header: 'No. Factura' },
             { field: 'concepto', header: 'Concepto' },
-            { field: 'centro_costo', header: 'Centro de Costo' },
             { field: (c: any) => c.empresa || '', header: 'Empresa' },
             { field: 'fecha_vencimiento', header: 'Vencimiento', type: 'date' as const },
             { field: (c: any) => c.aprobado === 'SI' ? 'Sí' : 'No', header: 'Aprobado' },
@@ -3230,7 +3190,7 @@ function GastoTab({ supplierId, nit }: { supplierId: string | null; nit: string 
             <table className="hh-table" style={{ minWidth: 800 }}>
               <thead>
                 <tr>
-                  {['Fecha Op','Importe','No. Factura','Fecha Factura','Concepto','Centro de Costo','Empresa','Vencimiento','Aprobado',''].map(h => <th key={h}>{h}</th>)}
+                  {['Fecha Factura','Importe','No. Factura','Concepto','Empresa','Vencimiento','Aprobado',''].map(h => <th key={h}>{h}</th>)}
                 </tr>
               </thead>
               <tbody>
@@ -3238,12 +3198,10 @@ function GastoTab({ supplierId, nit }: { supplierId: string | null; nit: string 
                   const isOverdue = c.fecha_vencimiento != null && c.fecha_vencimiento < today
                   return (
                     <tr key={c.id}>
-                      <td><span style={{ whiteSpace: 'nowrap' }}>{fmtDate(c.fecha_operacion)}</span></td>
-                      <td style={{ textAlign: 'right' }}><span style={{ fontFamily: 'var(--font-numeric)', fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' }}>{formatCOPFull(c.importe_cop ?? 0)}</span></td>
-                      <td>{c.doc_url && c.no_fac ? <a href={c.doc_url} target="_blank" rel="noopener noreferrer" className="hh-link">{c.no_fac}</a> : <span style={{ color: c.no_fac ? 'var(--hh-teal)' : 'var(--hh-haze)' }}>{c.no_fac ?? 'N/A'}</span>}</td>
                       <td><span style={{ whiteSpace: 'nowrap' }}>{fmtDate(c.fecha_factura)}</span></td>
+                      <td style={{ textAlign: 'right' }}><span style={{ fontFamily: 'var(--font-numeric)', fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' }}>{formatCOPFull(c.valor_total ?? 0)}</span></td>
+                      <td>{c.doc_url && c.no_factura ? <a href={c.doc_url} target="_blank" rel="noopener noreferrer" className="hh-link">{c.no_factura}</a> : <span style={{ color: c.no_factura ? 'var(--hh-teal)' : 'var(--hh-haze)' }}>{c.no_factura ?? 'N/A'}</span>}</td>
                       <td style={{ maxWidth: 180 }}><span style={{ display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{c.concepto ?? <span style={{ color: 'var(--hh-haze)' }}>—</span>}</span></td>
-                      <td>{c.centro_costo ?? <span style={{ color: 'var(--hh-haze)' }}>—</span>}</td>
                       <td><EmpresaPill empresa={c.empresa} /></td>
                       <td><span style={{ fontWeight: isOverdue ? 600 : undefined, color: isOverdue ? '#dc3545' : undefined, whiteSpace: 'nowrap' }}>{fmtDate(c.fecha_vencimiento)}</span></td>
                       <td>
@@ -3257,7 +3215,7 @@ function GastoTab({ supplierId, nit }: { supplierId: string | null; nit: string 
                         </span>
                       </td>
                       <td style={{ whiteSpace: 'nowrap' }}>
-                        {c.aprobado !== 'SI' && rowIndexMap.has(`${Math.round(c.importe_cop ?? 0)}|${c.fecha_vencimiento ?? ''}|${c.empresa ?? ''}`) && (
+                        {c.aprobado !== 'SI' && (
                           <button
                             onClick={() => handleApproveCpp(c)}
                             disabled={approvingId === c.id}
