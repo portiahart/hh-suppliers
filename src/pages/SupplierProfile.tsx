@@ -2846,19 +2846,9 @@ function GastoTab({ supplierId, nit }: { supplierId: string | null; nit: string 
   const [histLoading, setHistLoading] = useState(true)
   const [expanded, setExpanded] = useState<Set<string>>(new Set())
   const [toast, setToast] = useState<string | null>(null)
-  const [userRole, setUserRole] = useState('general_manager')
   const [approvingId, setApprovingId] = useState<string | null>(null)
 
   const showToast = (msg: string) => { setToast(msg); setTimeout(() => setToast(null), 3500) }
-
-  // User role
-  useEffect(() => {
-    if (!session?.user?.id) return
-    void (async () => {
-      const { data } = await supabase.from('crm_users').select('is_super_admin').eq('id', session.user.id).single()
-      if (data?.is_super_admin) setUserRole('super_admin')
-    })()
-  }, [session])
 
   // Financial data by NIT
   useEffect(() => {
