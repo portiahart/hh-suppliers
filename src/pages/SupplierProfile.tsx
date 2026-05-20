@@ -2932,6 +2932,10 @@ function GastoTab({ supplierId, nit }: { supplierId: string | null; nit: string 
   // ─── Metrics ───
   const totalPagado = txns.reduce((s, t) => s + (t.importe_cop ?? 0), 0)
   const promedio = txns.length > 0 ? totalPagado / txns.length : 0
+  const pagosRecibidos = txns.filter(t => (t.importe_cop ?? 0) > 0)
+  const pagosHechos = txns.filter(t => (t.importe_cop ?? 0) < 0)
+  const totalRecibido = pagosRecibidos.reduce((s, t) => s + (t.importe_cop ?? 0), 0)
+  const totalHecho = pagosHechos.reduce((s, t) => s + (t.importe_cop ?? 0), 0)
 
   const retRows = (
     [
@@ -3048,62 +3052,10 @@ function GastoTab({ supplierId, nit }: { supplierId: string | null; nit: string 
         )}
       </SectionCard>
 
-      {/* ── Card 3: Todas las Transacciones ── */}
-      <SectionCard
-        title={`Todas las Transacciones${!txLoading ? ` (${txns.length})` : ''}`}
-        action={
-          <ExcelDownloadButton onClick={() => {
-            const hasLinks = txns.some((t: any) => t.doc_url);
-            const cols: any[] = [
-              { field: 'fecha_operacion', header: 'Fecha Op.', type: 'date' as const },
-              { field: 'fecha_factura', header: 'Fecha Fac.', type: 'date' as const },
-              { field: 'concepto', header: 'Descripción' },
-              { field: 'centro_costo', header: 'Clasificación' },
-              { field: 'importe_cop', header: 'Importe COP', type: 'number' as const },
-              { field: (t: any) => t.empresa || '', header: 'Empresa' },
-              { field: () => 'Banco Colombia', header: 'Fuente' },
-              { field: 'no_factura', header: 'No. Factura' },
-            ];
-            if (hasLinks) cols.push({ field: (t: any) => t.doc_url || '', header: 'URL Factura' });
-            exportTableToExcel(txns, cols, 'transacciones');
-          }} />
-        }
-      >
-        {txLoading ? <SkeletonFields /> : txns.length === 0 ? (
-          <p style={{ fontFamily: 'var(--font-display)', fontWeight: 300, fontStyle: 'italic', fontSize: '0.9375rem', color: 'var(--hh-haze)', margin: 0 }}>
-            Sin transacciones registradas.
-          </p>
-        ) : (
-          <div style={{ overflowX: 'auto' }}>
-            <table className="hh-table" style={{ minWidth: 800 }}>
-              <thead>
-                <tr>
-                  {['Fecha Op','Fecha Fac','Descripción','Clasificación','Importe COP','Empresa','Fuente','No. Factura'].map(h => <th key={h}>{h}</th>)}
-                </tr>
-              </thead>
-              <tbody>
-                {txns.map((t) => (
-                  <tr key={t.id}>
-                    <td><span style={{ whiteSpace: 'nowrap' }}>{fmtDate(t.fecha_operacion)}</span></td>
-                    <td><span style={{ whiteSpace: 'nowrap' }}>{fmtDate(t.fecha_factura)}</span></td>
-                    <td style={{ maxWidth: 200 }}><span style={{ display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{t.concepto ?? <span style={{ color: 'var(--hh-haze)' }}>—</span>}</span></td>
-                    <td><span style={{ whiteSpace: 'nowrap' }}>{t.centro_costo ?? <span style={{ color: 'var(--hh-haze)' }}>—</span>}</span></td>
-                    <td style={{ textAlign: 'right' }}><span style={{ fontFamily: 'var(--font-numeric)', fontVariantNumeric: 'tabular-nums', color: (t.importe_cop ?? 0) >= 0 ? 'var(--hh-teal)' : 'var(--hh-mango)', whiteSpace: 'nowrap' }}>{formatCOPFull(t.importe_cop ?? 0)}</span></td>
-                    <td><EmpresaPill empresa={t.empresa} /></td>
-                    <td>Banco Colombia</td>
-                    <td>{t.doc_url && t.no_factura ? <a href={t.doc_url} target="_blank" rel="noopener noreferrer" className="hh-link">{t.no_factura}</a> : <span style={{ color: t.no_factura ? 'var(--hh-teal)' : 'var(--hh-haze)' }}>{t.no_factura ?? 'N/A'}</span>}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </SectionCard>
-
-      {/* ── Card 4: Facturas Pagadas ── */}
-      <SectionCard title={`Facturas Pagadas${!txLoading ? ` (${txns.length})` : ''}`} action={
+      {/* ── Card 3: Pagos Recibidos ── */}
+      <SectionCard title={`Pagos Recibidos${!txLoading ? ` (${pagosRecibidos.length})` : ''}`} action={
         <ExcelDownloadButton onClick={() => {
-          const hasLinks = txns.some((t: any) => t.doc_url);
+          const hasLinks = pagosRecibidos.some((t: any) => t.doc_url);
           const cols: any[] = [
             { field: 'fecha_operacion', header: 'Fecha Op.', type: 'date' as const },
             { field: 'fecha_factura', header: 'Fecha Fac.', type: 'date' as const },
@@ -3115,12 +3067,12 @@ function GastoTab({ supplierId, nit }: { supplierId: string | null; nit: string 
             { field: 'no_factura', header: 'No. Factura' },
           ];
           if (hasLinks) cols.push({ field: (t: any) => t.doc_url || '', header: 'URL Factura' });
-          exportTableToExcel(txns, cols, 'facturas_pagadas');
+          exportTableToExcel(pagosRecibidos, cols, 'pagos_recibidos');
         }} />
       }>
-        {txLoading ? <SkeletonFields /> : txns.length === 0 ? (
+        {txLoading ? <SkeletonFields /> : pagosRecibidos.length === 0 ? (
           <p style={{ fontFamily: 'var(--font-display)', fontWeight: 300, fontStyle: 'italic', fontSize: '0.9375rem', color: 'var(--hh-haze)', margin: 0 }}>
-            Sin facturas pagadas.
+            Sin pagos recibidos.
           </p>
         ) : (
           <div style={{ overflowX: 'auto' }}>
@@ -3131,13 +3083,13 @@ function GastoTab({ supplierId, nit }: { supplierId: string | null; nit: string 
                 </tr>
               </thead>
               <tbody>
-                {txns.map((t) => (
+                {pagosRecibidos.map((t) => (
                   <tr key={t.id}>
                     <td><span style={{ whiteSpace: 'nowrap' }}>{fmtDate(t.fecha_operacion)}</span></td>
                     <td><span style={{ whiteSpace: 'nowrap' }}>{fmtDate(t.fecha_factura)}</span></td>
                     <td style={{ maxWidth: 200 }}><span style={{ display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{t.concepto ?? <span style={{ color: 'var(--hh-haze)' }}>—</span>}</span></td>
                     <td><span style={{ whiteSpace: 'nowrap' }}>{t.centro_costo ?? <span style={{ color: 'var(--hh-haze)' }}>—</span>}</span></td>
-                    <td style={{ textAlign: 'right' }}><span style={{ fontFamily: 'var(--font-numeric)', fontVariantNumeric: 'tabular-nums', color: (t.importe_cop ?? 0) >= 0 ? 'var(--hh-teal)' : 'var(--hh-mango)', whiteSpace: 'nowrap' }}>{formatCOPFull(t.importe_cop ?? 0)}</span></td>
+                    <td style={{ textAlign: 'right' }}><span style={{ fontFamily: 'var(--font-numeric)', fontVariantNumeric: 'tabular-nums', color: 'var(--hh-teal)', whiteSpace: 'nowrap' }}>{formatCOPFull(t.importe_cop ?? 0)}</span></td>
                     <td><EmpresaPill empresa={t.empresa} /></td>
                     <td>Banco Colombia</td>
                     <td>{t.doc_url && t.no_factura ? <a href={t.doc_url} target="_blank" rel="noopener noreferrer" className="hh-link">{t.no_factura}</a> : <span style={{ color: t.no_factura ? 'var(--hh-teal)' : 'var(--hh-haze)' }}>{t.no_factura ?? 'N/A'}</span>}</td>
@@ -3146,9 +3098,66 @@ function GastoTab({ supplierId, nit }: { supplierId: string | null; nit: string 
               </tbody>
               <tfoot>
                 <tr>
-                  <td>Total Pagado / Recibido</td>
+                  <td>Total Recibido</td>
                   <td colSpan={3} />
-                  <td style={{ textAlign: 'right', fontVariantNumeric: 'tabular-nums', color: totalPagado >= 0 ? 'var(--hh-teal)' : 'var(--hh-mango)' }}>{formatCOPFull(totalPagado)}</td>
+                  <td style={{ textAlign: 'right', fontVariantNumeric: 'tabular-nums', color: 'var(--hh-teal)' }}>{formatCOPFull(totalRecibido)}</td>
+                  <td colSpan={3} />
+                </tr>
+              </tfoot>
+            </table>
+          </div>
+        )}
+      </SectionCard>
+
+      {/* ── Card 4: Pagos Hechos ── */}
+      <SectionCard title={`Pagos Hechos${!txLoading ? ` (${pagosHechos.length})` : ''}`} action={
+        <ExcelDownloadButton onClick={() => {
+          const hasLinks = pagosHechos.some((t: any) => t.doc_url);
+          const cols: any[] = [
+            { field: 'fecha_operacion', header: 'Fecha Op.', type: 'date' as const },
+            { field: 'fecha_factura', header: 'Fecha Fac.', type: 'date' as const },
+            { field: 'concepto', header: 'Descripción' },
+            { field: 'centro_costo', header: 'Clasificación' },
+            { field: 'importe_cop', header: 'Importe COP', type: 'number' as const },
+            { field: (t: any) => t.empresa || '', header: 'Empresa' },
+            { field: () => 'Banco Colombia', header: 'Fuente' },
+            { field: 'no_factura', header: 'No. Factura' },
+          ];
+          if (hasLinks) cols.push({ field: (t: any) => t.doc_url || '', header: 'URL Factura' });
+          exportTableToExcel(pagosHechos, cols, 'pagos_hechos');
+        }} />
+      }>
+        {txLoading ? <SkeletonFields /> : pagosHechos.length === 0 ? (
+          <p style={{ fontFamily: 'var(--font-display)', fontWeight: 300, fontStyle: 'italic', fontSize: '0.9375rem', color: 'var(--hh-haze)', margin: 0 }}>
+            Sin pagos hechos.
+          </p>
+        ) : (
+          <div style={{ overflowX: 'auto' }}>
+            <table className="hh-table" style={{ minWidth: 800 }}>
+              <thead>
+                <tr>
+                  {['Fecha Op','Fecha Fac','Descripción','Clasificación','Importe COP','Empresa','Fuente','No. Factura'].map(h => <th key={h}>{h}</th>)}
+                </tr>
+              </thead>
+              <tbody>
+                {pagosHechos.map((t) => (
+                  <tr key={t.id}>
+                    <td><span style={{ whiteSpace: 'nowrap' }}>{fmtDate(t.fecha_operacion)}</span></td>
+                    <td><span style={{ whiteSpace: 'nowrap' }}>{fmtDate(t.fecha_factura)}</span></td>
+                    <td style={{ maxWidth: 200 }}><span style={{ display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{t.concepto ?? <span style={{ color: 'var(--hh-haze)' }}>—</span>}</span></td>
+                    <td><span style={{ whiteSpace: 'nowrap' }}>{t.centro_costo ?? <span style={{ color: 'var(--hh-haze)' }}>—</span>}</span></td>
+                    <td style={{ textAlign: 'right' }}><span style={{ fontFamily: 'var(--font-numeric)', fontVariantNumeric: 'tabular-nums', color: 'var(--hh-mango)', whiteSpace: 'nowrap' }}>{formatCOPFull(t.importe_cop ?? 0)}</span></td>
+                    <td><EmpresaPill empresa={t.empresa} /></td>
+                    <td>Banco Colombia</td>
+                    <td>{t.doc_url && t.no_factura ? <a href={t.doc_url} target="_blank" rel="noopener noreferrer" className="hh-link">{t.no_factura}</a> : <span style={{ color: t.no_factura ? 'var(--hh-teal)' : 'var(--hh-haze)' }}>{t.no_factura ?? 'N/A'}</span>}</td>
+                  </tr>
+                ))}
+              </tbody>
+              <tfoot>
+                <tr>
+                  <td>Total Pagado</td>
+                  <td colSpan={3} />
+                  <td style={{ textAlign: 'right', fontVariantNumeric: 'tabular-nums', color: 'var(--hh-mango)' }}>{formatCOPFull(totalHecho)}</td>
                   <td colSpan={3} />
                 </tr>
               </tfoot>
