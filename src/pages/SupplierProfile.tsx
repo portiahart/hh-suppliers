@@ -2985,7 +2985,7 @@ function GastoTab({ supplierId, nit }: { supplierId: string | null; nit: string 
         {txLoading ? <SkeletonFields /> : (
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 12 }}>
             {[
-              { label: 'Total Pagado', value: formatCOPFull(totalPagado), accent: 'var(--hh-teal)' },
+              { label: 'Total Pagado / Recibido', value: formatCOPFull(totalPagado), accent: totalPagado >= 0 ? 'var(--hh-teal)' : 'var(--hh-mango)' },
               { label: 'Transacciones', value: txns.length.toLocaleString('es-CO'), accent: 'var(--hh-lemon)' },
               { label: 'Promedio por Tx', value: txns.length > 0 ? formatCOPFull(promedio) : '—', accent: 'var(--hh-haze)' },
             ].map(({ label, value, accent }) => (
@@ -3088,7 +3088,7 @@ function GastoTab({ supplierId, nit }: { supplierId: string | null; nit: string 
                     <td><span style={{ whiteSpace: 'nowrap' }}>{fmtDate(t.fecha_factura)}</span></td>
                     <td style={{ maxWidth: 200 }}><span style={{ display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{t.concepto ?? <span style={{ color: 'var(--hh-haze)' }}>—</span>}</span></td>
                     <td><span style={{ whiteSpace: 'nowrap' }}>{t.centro_costo ?? <span style={{ color: 'var(--hh-haze)' }}>—</span>}</span></td>
-                    <td style={{ textAlign: 'right' }}><span style={{ fontFamily: 'var(--font-numeric)', fontVariantNumeric: 'tabular-nums', color: 'var(--hh-mango)', whiteSpace: 'nowrap' }}>{formatCOPFull(t.importe_cop ?? 0)}</span></td>
+                    <td style={{ textAlign: 'right' }}><span style={{ fontFamily: 'var(--font-numeric)', fontVariantNumeric: 'tabular-nums', color: (t.importe_cop ?? 0) >= 0 ? 'var(--hh-teal)' : 'var(--hh-mango)', whiteSpace: 'nowrap' }}>{formatCOPFull(t.importe_cop ?? 0)}</span></td>
                     <td><EmpresaPill empresa={t.empresa} /></td>
                     <td>Banco Colombia</td>
                     <td>{t.doc_url && t.no_factura ? <a href={t.doc_url} target="_blank" rel="noopener noreferrer" className="hh-link">{t.no_factura}</a> : <span style={{ color: t.no_factura ? 'var(--hh-teal)' : 'var(--hh-haze)' }}>{t.no_factura ?? 'N/A'}</span>}</td>
@@ -3106,12 +3106,13 @@ function GastoTab({ supplierId, nit }: { supplierId: string | null; nit: string 
           const hasLinks = txns.some((t: any) => t.doc_url);
           const cols: any[] = [
             { field: 'fecha_operacion', header: 'Fecha Op.', type: 'date' as const },
+            { field: 'fecha_factura', header: 'Fecha Fac.', type: 'date' as const },
+            { field: 'concepto', header: 'Descripción' },
+            { field: 'centro_costo', header: 'Clasificación' },
             { field: 'importe_cop', header: 'Importe COP', type: 'number' as const },
-            { field: 'no_factura', header: 'No. Factura' },
-            { field: 'fecha_factura', header: 'Fecha Factura', type: 'date' as const },
-            { field: 'concepto', header: 'Concepto' },
-            { field: 'centro_costo', header: 'Centro de Costo' },
             { field: (t: any) => t.empresa || '', header: 'Empresa' },
+            { field: () => 'Banco Colombia', header: 'Fuente' },
+            { field: 'no_factura', header: 'No. Factura' },
           ];
           if (hasLinks) cols.push({ field: (t: any) => t.doc_url || '', header: 'URL Factura' });
           exportTableToExcel(txns, cols, 'facturas_pagadas');
@@ -3123,30 +3124,32 @@ function GastoTab({ supplierId, nit }: { supplierId: string | null; nit: string 
           </p>
         ) : (
           <div style={{ overflowX: 'auto' }}>
-            <table className="hh-table" style={{ minWidth: 640 }}>
+            <table className="hh-table" style={{ minWidth: 800 }}>
               <thead>
                 <tr>
-                  {['Fecha Op','Importe COP','No. Factura','Fecha Factura','Concepto','Centro de Costo','Empresa'].map(h => <th key={h}>{h}</th>)}
+                  {['Fecha Op','Fecha Fac','Descripción','Clasificación','Importe COP','Empresa','Fuente','No. Factura'].map(h => <th key={h}>{h}</th>)}
                 </tr>
               </thead>
               <tbody>
                 {txns.map((t) => (
                   <tr key={t.id}>
                     <td><span style={{ whiteSpace: 'nowrap' }}>{fmtDate(t.fecha_operacion)}</span></td>
-                    <td style={{ textAlign: 'right' }}><span style={{ fontFamily: 'var(--font-numeric)', fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' }}>{formatCOPFull(t.importe_cop ?? 0)}</span></td>
-                    <td>{t.doc_url && t.no_factura ? <a href={t.doc_url} target="_blank" rel="noopener noreferrer" className="hh-link">{t.no_factura}</a> : <span style={{ color: t.no_factura ? 'var(--hh-teal)' : 'var(--hh-haze)' }}>{t.no_factura ?? 'N/A'}</span>}</td>
                     <td><span style={{ whiteSpace: 'nowrap' }}>{fmtDate(t.fecha_factura)}</span></td>
-                    <td style={{ maxWidth: 180 }}><span style={{ display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{t.concepto ?? <span style={{ color: 'var(--hh-haze)' }}>—</span>}</span></td>
-                    <td>{t.centro_costo ?? <span style={{ color: 'var(--hh-haze)' }}>—</span>}</td>
+                    <td style={{ maxWidth: 200 }}><span style={{ display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{t.concepto ?? <span style={{ color: 'var(--hh-haze)' }}>—</span>}</span></td>
+                    <td><span style={{ whiteSpace: 'nowrap' }}>{t.centro_costo ?? <span style={{ color: 'var(--hh-haze)' }}>—</span>}</span></td>
+                    <td style={{ textAlign: 'right' }}><span style={{ fontFamily: 'var(--font-numeric)', fontVariantNumeric: 'tabular-nums', color: (t.importe_cop ?? 0) >= 0 ? 'var(--hh-teal)' : 'var(--hh-mango)', whiteSpace: 'nowrap' }}>{formatCOPFull(t.importe_cop ?? 0)}</span></td>
                     <td><EmpresaPill empresa={t.empresa} /></td>
+                    <td>Banco Colombia</td>
+                    <td>{t.doc_url && t.no_factura ? <a href={t.doc_url} target="_blank" rel="noopener noreferrer" className="hh-link">{t.no_factura}</a> : <span style={{ color: t.no_factura ? 'var(--hh-teal)' : 'var(--hh-haze)' }}>{t.no_factura ?? 'N/A'}</span>}</td>
                   </tr>
                 ))}
               </tbody>
               <tfoot>
                 <tr>
-                  <td>Total Pagado</td>
-                  <td style={{ textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{formatCOPFull(totalPagado)}</td>
-                  <td colSpan={5} />
+                  <td>Total Pagado / Recibido</td>
+                  <td colSpan={3} />
+                  <td style={{ textAlign: 'right', fontVariantNumeric: 'tabular-nums', color: totalPagado >= 0 ? 'var(--hh-teal)' : 'var(--hh-mango)' }}>{formatCOPFull(totalPagado)}</td>
+                  <td colSpan={3} />
                 </tr>
               </tfoot>
             </table>
