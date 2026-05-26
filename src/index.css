@@ -5,7 +5,7 @@
 @tailwind utilities;
 
 :root {
-  --hh-dark:    #1F2D3D;
+  --hh-dark:    #0f172a;
   --hh-haze:    #7A91A5;
   --hh-ice:     #F2F5F8;
   --hh-white:   #FFFFFF;
@@ -23,7 +23,7 @@
   --brand-ga: #98B250;
   --brand-nc: #EAB955;
   --brand-mo: #000000;
-  --brand-hh: #1F2D3D;
+  --brand-hh: #0f172a;
 }
 
 *, *::before, *::after {
@@ -54,7 +54,7 @@ body {
   font-size: 0.6rem;
   letter-spacing: 0.06em;
   text-transform: uppercase;
-  color: #1F2D3D;
+  color: #0f172a;
   background: #F2F5F8;
   padding: 7px 8px;
   border-bottom: 2px solid #D0D8E0;
@@ -76,7 +76,7 @@ body {
   font-size: 0.75rem;
   font-weight: 700;
   font-family: 'DM Sans', system-ui, sans-serif;
-  border-top: 2px solid #1F2D3D;
+  border-top: 2px solid #0f172a;
   border-bottom: none;
   background: #FFFFFF;
 }

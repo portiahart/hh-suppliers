@@ -27,8 +27,8 @@ const ENTITY_COLORS: Record<string, { bg: string; text: string }> = {
   GA: { bg: '#98B250', text: '#658D5E' },
   NC: { bg: '#EAB955', text: '#B9484E' },
   MO: { bg: '#000000', text: '#fff' },
-  HH: { bg: '#1F2D3D', text: '#F2F5F8' },
-  MA: { bg: '#1F2D3D', text: '#F2F5F8' },
+  HH: { bg: '#0f172a', text: '#F2F5F8' },
+  MA: { bg: '#0f172a', text: '#F2F5F8' },
 }
 
 interface Assessment {

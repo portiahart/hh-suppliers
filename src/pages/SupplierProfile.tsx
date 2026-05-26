@@ -2785,6 +2785,7 @@ interface TxRow {
   empresa: string | null
   no_factura: string | null
   doc_url: string | null
+  range_source: string | null
 }
 
 interface CppRow {
@@ -2856,7 +2857,7 @@ function GastoTab({ supplierId, nit }: { supplierId: string | null; nit: string 
     void (async () => {
       const [{ data: txData }, { data: cppData }] = await Promise.all([
         supabase.from('accounts_bancos')
-          .select('id, fecha_operacion, fecha_factura, proveedor, nit, importe_cop, monto_base, total_iva, total_ipc, rete_fuente, rete_ica, concepto, centro_costo, empresa, no_factura, doc_url')
+          .select('id, fecha_operacion, fecha_factura, proveedor, nit, importe_cop, monto_base, total_iva, total_ipc, rete_fuente, rete_ica, concepto, centro_costo, empresa, no_factura, doc_url, range_source')
           .eq('nit', nit)
           .order('fecha_operacion', { ascending: false })
           .limit(10000),
@@ -3063,7 +3064,7 @@ function GastoTab({ supplierId, nit }: { supplierId: string | null; nit: string 
             { field: 'centro_costo', header: 'Clasificación' },
             { field: 'importe_cop', header: 'Importe COP', type: 'number' as const },
             { field: (t: any) => t.empresa || '', header: 'Empresa' },
-            { field: () => 'Banco Colombia', header: 'Fuente' },
+            { field: (t: any) => t.range_source ?? 'BANCOS', header: 'Fuente' },
             { field: 'no_factura', header: 'No. Factura' },
           ];
           if (hasLinks) cols.push({ field: (t: any) => t.doc_url || '', header: 'URL Factura' });
@@ -3091,7 +3092,7 @@ function GastoTab({ supplierId, nit }: { supplierId: string | null; nit: string 
                     <td><span style={{ whiteSpace: 'nowrap' }}>{t.centro_costo ?? <span style={{ color: 'var(--hh-haze)' }}>—</span>}</span></td>
                     <td style={{ textAlign: 'right' }}><span style={{ fontFamily: 'var(--font-numeric)', fontVariantNumeric: 'tabular-nums', color: 'var(--hh-teal)', whiteSpace: 'nowrap' }}>{formatCOPFull(t.importe_cop ?? 0)}</span></td>
                     <td><EmpresaPill empresa={t.empresa} /></td>
-                    <td>Banco Colombia</td>
+                    <td>{t.range_source ?? 'BANCOS'}</td>
                     <td>{t.doc_url && t.no_factura ? <a href={t.doc_url} target="_blank" rel="noopener noreferrer" className="hh-link">{t.no_factura}</a> : <span style={{ color: t.no_factura ? 'var(--hh-teal)' : 'var(--hh-haze)' }}>{t.no_factura ?? 'N/A'}</span>}</td>
                   </tr>
                 ))}
@@ -3120,7 +3121,7 @@ function GastoTab({ supplierId, nit }: { supplierId: string | null; nit: string 
             { field: 'centro_costo', header: 'Clasificación' },
             { field: 'importe_cop', header: 'Importe COP', type: 'number' as const },
             { field: (t: any) => t.empresa || '', header: 'Empresa' },
-            { field: () => 'Banco Colombia', header: 'Fuente' },
+            { field: (t: any) => t.range_source ?? 'BANCOS', header: 'Fuente' },
             { field: 'no_factura', header: 'No. Factura' },
           ];
           if (hasLinks) cols.push({ field: (t: any) => t.doc_url || '', header: 'URL Factura' });
@@ -3148,7 +3149,7 @@ function GastoTab({ supplierId, nit }: { supplierId: string | null; nit: string 
                     <td><span style={{ whiteSpace: 'nowrap' }}>{t.centro_costo ?? <span style={{ color: 'var(--hh-haze)' }}>—</span>}</span></td>
                     <td style={{ textAlign: 'right' }}><span style={{ fontFamily: 'var(--font-numeric)', fontVariantNumeric: 'tabular-nums', color: 'var(--hh-mango)', whiteSpace: 'nowrap' }}>{formatCOPFull(t.importe_cop ?? 0)}</span></td>
                     <td><EmpresaPill empresa={t.empresa} /></td>
-                    <td>Banco Colombia</td>
+                    <td>{t.range_source ?? 'BANCOS'}</td>
                     <td>{t.doc_url && t.no_factura ? <a href={t.doc_url} target="_blank" rel="noopener noreferrer" className="hh-link">{t.no_factura}</a> : <span style={{ color: t.no_factura ? 'var(--hh-teal)' : 'var(--hh-haze)' }}>{t.no_factura ?? 'N/A'}</span>}</td>
                   </tr>
                 ))}

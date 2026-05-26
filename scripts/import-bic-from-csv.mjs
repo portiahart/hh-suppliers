@@ -12,16 +12,17 @@ const supabase = createClient(SUPABASE_URL, SERVICE_ROLE_KEY, {
 
 // Column indices (0-based) verified from CSV header
 const COL = {
-  proveedor: 0,
-  nit:       1,
-  ciudad:    8,
-  pais:      10,
-  score:     39,
-  ubicacion: 40,
-  indep:     43,
-  under:     44,
-  small:     45,
-  minoria:   46,
+  proveedor:      0,
+  nit:            1,
+  ciudad:         8,
+  pais:           10,
+  pago_inmediato: 13,
+  score:          39,
+  ubicacion:      40,
+  indep:          43,
+  under:          44,
+  small:          45,
+  minoria:        46,
 }
 
 function parseCSVLine(line) {
@@ -78,13 +79,14 @@ async function main() {
     const ciudad       = nullIfEmpty(g(row, COL.ciudad))
     const pais         = nullIfEmpty(g(row, COL.pais))
 
-    const score     = nullIfIncomplete(g(row, COL.score))
-    const ubicacion = nullIfIncomplete(ubicacionRaw)
-    const indep     = nullIfEmpty(g(row, COL.indep))
-    const under     = nullIfEmpty(g(row, COL.under))
-    const small     = nullIfEmpty(g(row, COL.small))
-    const minoria   = nullIfEmpty(g(row, COL.minoria))
-    const hasData   = !!(score || ubicacion || ciudad || pais || indep || under || small || minoria)
+    const score          = nullIfIncomplete(g(row, COL.score))
+    const ubicacion      = nullIfIncomplete(ubicacionRaw)
+    const indep          = nullIfEmpty(g(row, COL.indep))
+    const under          = nullIfEmpty(g(row, COL.under))
+    const small          = nullIfEmpty(g(row, COL.small))
+    const minoria        = nullIfEmpty(g(row, COL.minoria))
+    const pagoInmediato  = g(row, COL.pago_inmediato).toLowerCase() === 'inmediato'
+    const hasData        = !!(score || ubicacion || ciudad || pais || indep || under || small || minoria)
 
     byNit.set(nit, {
       bic_survey_score:  score,
@@ -96,6 +98,7 @@ async function main() {
       bic_small_company: small,
       bic_minoria:       minoria,
       bic_synced_at:     hasData ? new Date().toISOString() : null,
+      pago_inmediato:    pagoInmediato,
     })
   }
 
