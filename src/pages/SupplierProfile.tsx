@@ -2854,28 +2854,73 @@ function GastoTab({ supplierId, nit }: { supplierId: string | null; nit: string 
 
   const showToast = (msg: string) => { setToast(msg); setTimeout(() => setToast(null), 3500) }
 
-  // Financial data by NIT
+  // Financial data by NIT (bancos + cxp) and by supplierId (accounts_transactions / CASHAPP)
   useEffect(() => {
-    if (!nit) { setTxLoading(false); return }
+    if (!nit && !supplierId) { setTxLoading(false); return }
     void (async () => {
-      const [{ data: txData }, { data: cppData }] = await Promise.all([
-        supabase.from('accounts_bancos')
-          .select('id, fecha_operacion, fecha_factura, proveedor, nit, importe_cop, monto_base, total_iva, total_ipc, rete_fuente, rete_ica, concepto, centro_costo, empresa, no_factura, doc_url, range_source')
-          .eq('nit', nit)
-          .order('fecha_operacion', { ascending: false })
-          .limit(10000),
-        supabase.from('cxp_facturas')
-          .select('id, fecha_factura, fecha_vencimiento, nit, valor_total, concepto, empresa, no_factura, doc_url, aprobado')
-          .eq('nit', nit)
-          .eq('pagado', 'POR PAGAR')
-          .order('fecha_vencimiento', { ascending: true, nullsFirst: false })
-          .limit(10000),
+      const [{ data: txData }, { data: cppData }, { data: atData }] = await Promise.all([
+        nit
+          ? supabase.from('accounts_bancos')
+              .select('id, fecha_operacion, fecha_factura, proveedor, nit, importe_cop, monto_base, total_iva, total_ipc, rete_fuente, rete_ica, concepto, centro_costo, empresa, no_factura, doc_url, range_source')
+              .eq('nit', nit)
+              .order('fecha_operacion', { ascending: false })
+              .limit(10000)
+          : Promise.resolve({ data: [] }),
+        nit
+          ? supabase.from('cxp_facturas')
+              .select('id, fecha_factura, fecha_vencimiento, nit, valor_total, concepto, empresa, no_factura, doc_url, aprobado')
+              .eq('nit', nit)
+              .eq('pagado', 'POR PAGAR')
+              .order('fecha_vencimiento', { ascending: true, nullsFirst: false })
+              .limit(10000)
+          : Promise.resolve({ data: [] }),
+        supplierId
+          ? supabase.from('accounts_transactions')
+              .select('id, amount, currency, transaction_date, company_id, description, cost_centre, receipt_url')
+              .eq('supplier_id', supplierId)
+              .eq('type', 'expense')
+              .order('transaction_date', { ascending: false })
+              .limit(10000)
+          : Promise.resolve({ data: [] }),
       ])
-      setTxns((txData as TxRow[]) ?? [])
+
+      // Resolve company_id → empresa code for accounts_transactions rows
+      type AtRow = { id: string; amount: number; currency: string; transaction_date: string; company_id: string | null; description: string | null; cost_centre: string | null; receipt_url: string | null }
+      const atRows = (atData ?? []) as AtRow[]
+      let compMap = new Map<string, string>()
+      if (atRows.length > 0) {
+        const { data: compData } = await supabase.from('companies').select('id, name')
+        compMap = new Map(((compData ?? []) as { id: string; name: string }[]).map(c => [c.id, c.name]))
+      }
+
+      const atTxRows: TxRow[] = atRows.map(r => ({
+        id: r.id,
+        fecha_operacion: r.transaction_date,
+        fecha_factura: r.transaction_date,
+        proveedor: null,
+        nit,
+        importe_cop: -(r.amount),
+        monto_base: r.amount,
+        total_iva: null,
+        total_ipc: null,
+        rete_fuente: null,
+        rete_ica: null,
+        concepto: r.description,
+        centro_costo: r.cost_centre,
+        empresa: compMap.get(r.company_id ?? '') ?? null,
+        no_factura: null,
+        doc_url: r.receipt_url,
+        range_source: 'CASHAPP',
+      }))
+
+      const combined = [...(txData as TxRow[] ?? []), ...atTxRows]
+        .sort((a, b) => (b.fecha_operacion ?? '').localeCompare(a.fecha_operacion ?? ''))
+
+      setTxns(combined)
       setCpp((cppData as CppRow[]) ?? [])
       setTxLoading(false)
     })()
-  }, [nit])
+  }, [nit, supplierId])
 
   // Historial by supplierId
   useEffect(() => {
