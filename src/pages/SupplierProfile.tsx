@@ -2858,7 +2858,11 @@ function GastoTab({ supplierId, nit }: { supplierId: string | null; nit: string 
   useEffect(() => {
     if (!nit && !supplierId) { setTxLoading(false); return }
     void (async () => {
-      const [{ data: txData }, { data: cppData }, { data: atData }] = await Promise.all([
+      type AtRow   = { id: string; amount: number; currency: string; transaction_date: string; company_id: string | null; description: string | null; cost_centre: string | null; receipt_url: string | null }
+      type WiseRow = { reference_number: string; date: string; amount_value: number; amount_currency: string; empresa: string | null; nit: string | null; concepto: string | null; description: string | null; no_factura: string | null; fecha_factura: string | null; centro_costo: string | null; doc_url: string | null; type: string }
+      type MercRow = { id: string; posted_at: string | null; amount: number; currency: string; empresa: string | null; nit: string | null; concepto: string | null; bank_description: string | null; no_factura: string | null; fecha_factura: string | null; centro_costo: string | null; doc_url: string | null }
+
+      const [{ data: txData }, { data: cppData }, { data: atData }, { data: wiseData }, { data: mercData }] = await Promise.all([
         nit
           ? supabase.from('accounts_bancos')
               .select('id, fecha_operacion, fecha_factura, proveedor, nit, importe_cop, monto_base, total_iva, total_ipc, rete_fuente, rete_ica, concepto, centro_costo, empresa, no_factura, doc_url, range_source')
@@ -2882,10 +2886,23 @@ function GastoTab({ supplierId, nit }: { supplierId: string | null; nit: string 
               .order('transaction_date', { ascending: false })
               .limit(10000)
           : Promise.resolve({ data: [] }),
+        nit
+          ? supabase.from('wise_transactions')
+              .select('reference_number, date, amount_value, amount_currency, empresa, nit, concepto, description, no_factura, fecha_factura, centro_costo, doc_url, type')
+              .eq('nit', nit)
+              .order('date', { ascending: false })
+              .limit(10000)
+          : Promise.resolve({ data: [] }),
+        nit
+          ? supabase.from('mercury_transactions')
+              .select('id, posted_at, amount, currency, empresa, nit, concepto, bank_description, no_factura, fecha_factura, centro_costo, doc_url')
+              .eq('nit', nit)
+              .order('posted_at', { ascending: false })
+              .limit(10000)
+          : Promise.resolve({ data: [] }),
       ])
 
       // Resolve company_id → empresa code for accounts_transactions rows
-      type AtRow = { id: string; amount: number; currency: string; transaction_date: string; company_id: string | null; description: string | null; cost_centre: string | null; receipt_url: string | null }
       const atRows = (atData ?? []) as AtRow[]
       let compMap = new Map<string, string>()
       if (atRows.length > 0) {
@@ -2901,10 +2918,7 @@ function GastoTab({ supplierId, nit }: { supplierId: string | null; nit: string 
         nit,
         importe_cop: -(r.amount),
         monto_base: r.amount,
-        total_iva: null,
-        total_ipc: null,
-        rete_fuente: null,
-        rete_ica: null,
+        total_iva: null, total_ipc: null, rete_fuente: null, rete_ica: null,
         concepto: r.description,
         centro_costo: r.cost_centre,
         empresa: compMap.get(r.company_id ?? '') ?? null,
@@ -2913,8 +2927,46 @@ function GastoTab({ supplierId, nit }: { supplierId: string | null; nit: string 
         range_source: 'CASHAPP',
       }))
 
-      const combined = [...(txData as TxRow[] ?? []), ...atTxRows]
-        .sort((a, b) => (b.fecha_operacion ?? '').localeCompare(a.fecha_operacion ?? ''))
+      const wiseTxRows: TxRow[] = (wiseData as WiseRow[] ?? []).map(r => ({
+        id: r.reference_number,
+        fecha_operacion: r.date,
+        fecha_factura: r.fecha_factura,
+        proveedor: null,
+        nit,
+        importe_cop: r.type === 'DEBIT' ? -(r.amount_value) : r.amount_value,
+        monto_base: r.amount_value,
+        total_iva: null, total_ipc: null, rete_fuente: null, rete_ica: null,
+        concepto: r.concepto ?? r.description,
+        centro_costo: r.centro_costo,
+        empresa: r.empresa,
+        no_factura: r.no_factura,
+        doc_url: r.doc_url,
+        range_source: 'WISE',
+      }))
+
+      const mercTxRows: TxRow[] = (mercData as MercRow[] ?? []).map(r => ({
+        id: r.id,
+        fecha_operacion: r.posted_at?.slice(0, 10) ?? null,
+        fecha_factura: r.fecha_factura,
+        proveedor: null,
+        nit,
+        importe_cop: r.amount,
+        monto_base: Math.abs(r.amount),
+        total_iva: null, total_ipc: null, rete_fuente: null, rete_ica: null,
+        concepto: r.concepto ?? r.bank_description,
+        centro_costo: r.centro_costo,
+        empresa: r.empresa,
+        no_factura: r.no_factura,
+        doc_url: r.doc_url,
+        range_source: 'MERCURY',
+      }))
+
+      const combined = [
+        ...(txData as TxRow[] ?? []),
+        ...atTxRows,
+        ...wiseTxRows,
+        ...mercTxRows,
+      ].sort((a, b) => (b.fecha_operacion ?? '').localeCompare(a.fecha_operacion ?? ''))
 
       setTxns(combined)
       setCpp((cppData as CppRow[]) ?? [])
