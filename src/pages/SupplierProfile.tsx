@@ -25,6 +25,9 @@ export function SupplierProfile() {
   const [archiving, setArchiving] = useState(false)
 
   useEffect(() => {
+    setActiveTab('General')
+    setSupplier(null)
+    setLoading(true)
     if (!id) return
     void (async () => {
       const { data, error } = await supabase

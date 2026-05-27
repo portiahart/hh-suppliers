@@ -3,13 +3,15 @@
 **Repo:** portiahart/hh-suppliers
 **Supabase project:** hh-main (`dqfrqjsbfmwtclkclmvc`)
 **Deployed:** prov.portiahart.com
-**Last updated:** 2026-05-10
+**Last updated:** 2026-05-27
 
 ---
 
 ## Overview
 
-Supplier database management app for Hart Hospitality. Staff can search, create, and manage supplier records; view payables dashboards; run Colombian tax retention (retenciones) calculations from parsed RUT documents; and produce BIC (B Corp Impact Colombia) reports. All data lives in hh-main Supabase — `accounts_suppliers` is shared with hh-accounts.
+Supplier database management app for Hart Hospitality. Staff can search, create, and manage supplier records; view payables dashboards; run Colombian tax retention (retenciones) calculations from parsed RUT documents; and produce BIC (B Corp Impact Colombia) reports. All data lives in hh-main Supabase.
+
+**hh-main is a shared Supabase instance.** Multiple HH apps (hh-suppliers, hh-accounts, hh-crm, hh-corazon, etc.) all connect to the same project (`dqfrqjsbfmwtclkclmvc`). Many tables are owned or populated by one app and read by others. When you see a table this app didn't create or doesn't write to, it belongs to another app in the ecosystem. Do not assume a table is stale or missing just because it isn't documented in this file — verify against the DB first.
 
 **Commands:**
 ```
@@ -65,6 +67,8 @@ All protected routes are wrapped in `ProtectedRoute` → `AppLayout` (sidebar sh
 | `/new` | NewSupplierFlow | Protected |
 | `/settings` | SettingsPage | Protected |
 | `/reportes-bic` | ReportesBICPage | Protected |
+| `/incompletos/:category` | IncompletosPage | Protected |
+| `/cxp` | CxPPage | Protected |
 
 ---
 
@@ -76,14 +80,22 @@ Main dashboard. Three sections:
 
 **Hero search** — typeahead input with 250ms debounce. Searches `accounts_suppliers` via `suppliersQuery` with `OR(razon_social.ilike, nombre_operativo.ilike, nit.ilike)`, limit 8. Results shown in dropdown; click navigates to `/suppliers/:id`.
 
-**Action cards** — three summary cards fed from `cuentas_por_pagar_cache`:
-- *Facturas Aprobadas* — `aprobado = 'SI'`
-- *Facturas Pendiente Aprobación* — `aprobado != 'SI'` AND `fecha_vencimiento <= end of current month`
-- *Cartera Vencida* — `fecha_vencimiento < today`
+**Two Top 20 tables (last 60 days):**
 
-Each card shows count + total COP. A **company filter** (derived from CPP data) narrows all three cards. Clicking amounts opens a drill-down `InvoiceModal`.
+*Top 20 Proveedores* — money out (negative flows), grouped by NIT. Sources:
+- `accounts_bancos` where `importe_cop < 0` (paginated 1000/page, already COP)
+- `accounts_transactions` where `type = 'expense'` — amount always positive, currency converted via `trm_daily`; `supplier_id` resolved to NIT via `accounts_suppliers`; `company_id` resolved to empresa code via `companies`
+- `wise_transactions` where `type = 'DEBIT'` and nit/empresa not null — `amount_value` converted via `trm_daily`
+- `mercury_transactions` where `amount < 0` and nit/empresa not null — converted via `trm_daily`
+Shows entity pills per HH company. Loads `suppliers_assessment.pass` badges.
 
-**Top 20 suppliers by spend (last 60 days)** — fetches all rows from `transactions_cache` with `fecha_factura >= today - 60`. Groups by NIT, sums `importe_cop` (respects `empresa_split` jsonb for shared-entity allocations), shows top 20. Loads `suppliers_assessment.pass` badges for each row.
+*Top 20 Clientes* — money in (positive flows), grouped by NIT. Sources:
+- `accounts_bancos` where `importe_cop > 0`
+- `wise_transactions` where `type = 'CREDIT'` and nit/empresa not null
+- `mercury_transactions` where `amount > 0` and nit/empresa not null
+Note: `accounts_transactions.type='sales_allocation'` has no client NIT so is excluded.
+
+**Currency conversion:** `trm_daily` (columns: `date`, `usd_cop`, `gbp_cop`, `eur_cop`) is fetched for the period, sorted descending. Each non-COP amount is converted using the latest rate on or before the transaction date.
 
 **Super admin extras** (only when `crm_users.is_super_admin = true`):
 - Duplicate detection: full scan of `accounts_suppliers`, groups by normalized `razon_social`, shows count badge → `DuplicatesModal`
@@ -99,7 +111,7 @@ Six-tab layout:
 | Bancario | Bank account details from `suppliers_banking`; upload Certificado Bancario PDF/image → `extract-banking` edge function (Claude) auto-fills fields |
 | Evaluación | Happy Supplier Test from `suppliers_assessment`; answers jsonb, total_score, pass/fail, assessed_by |
 | B Corp | BIC survey fields (bic_survey_score, bic_ubicacion, etc.) from `accounts_suppliers`; also shows parsed retenciones recommendations from RUT data |
-| Gasto | Spend history from `transactions_cache` filtered by NIT; month-by-month breakdown |
+| Gasto | Spend history and outstanding payables filtered by NIT; month-by-month aggregates by entity |
 | Contactos CRM | Links to this supplier's contacts in the CRM (hh-crm-app) by NIT |
 
 Sections on the General tab (in order):
@@ -114,6 +126,11 @@ Also shows:
 - Documents from `suppliers_documents` (uploaded RUT, Cámara de Comercio, etc.)
 - Retenciones panel: if RUT data is available in `suppliers_legal`, runs `computeRetenciones(rut)` and renders a table of Retefuente / ReteICA / ReteIVA recommendations
 - Archive button (super admin only): sets `archived_at`, hides from `suppliersQuery`
+
+**Gasto tab data sources** (three queries, all by NIT):
+1. `accounts_bancos` — historical transactions (shared table, owned/populated by hh-accounts). Columns used: `fecha_operacion`, `fecha_factura`, `proveedor`, `nit`, `importe_cop`, `monto_base`, `total_iva`, `total_ipc`, `rete_fuente`, `rete_ica`, `concepto`, `centro_costo`, `empresa`, `no_factura`, `doc_url`, `range_source`.
+2. `cxp_facturas` — outstanding payables where `pagado = 'POR PAGAR'`, ordered by `fecha_vencimiento`.
+3. `suppliers_spend_monthly` — aggregated monthly spend by entity (by `supplier_id`, not NIT).
 
 ### NewSupplierFlow (`/new`)
 
@@ -340,9 +357,151 @@ Legal / tax identity data from parsed RUT. Populated by RUT extraction flow.
 | rep_legal_documento | text | Legal representative document number |
 | updated_at | timestamptz | |
 
-### `transactions_cache`
+### `cxp_facturas` (shared with hh-accounts)
 
-Cache of expense transactions from Google Sheets ranges. Full DELETE + INSERT on each sync (not upsert). Synced by `sync-transactions-cache` edge function from BANCOS, CASHAPP, TARSCOL, EXTRA named ranges.
+Accounts payable invoices from the xPP named range in Google Sheets. **Schema owned by hh-suppliers; read by hh-accounts for reconciliation.**
+
+| Column | Type | Notes |
+|--------|------|-------|
+| `id` | uuid PK | Auto-generated; no sheet equivalent |
+| `sheet_uuid` | text UNIQUE | Permanent row identifier from the sheet (col AI, range index 34). Conflict key for upsert. |
+| `sheet_row_num` | integer | 1-based row in the xPP range (for debugging) |
+| `proveedor` | text | Supplier name (col S, index 18; fallback: col B, index 1) |
+| `nit` | text | |
+| `no_factura` | text | |
+| `concepto` | text | |
+| `tipo_documento` | text | |
+| `tipo_egreso` | text | |
+| `fecha_factura` | date | |
+| `fecha_vencimiento` | date | |
+| `fecha_pago` | date | |
+| `valor_total` | numeric | |
+| `monto_base` / `dcto` | numeric | |
+| `iva_19` / `iva_5` / `ipc` / `otros_exentos` | numeric | Tax breakdowns |
+| `tasa_retefuente` / `retefuente` | numeric | |
+| `tasa_reteica` / `reteica` | numeric | |
+| `empresa` | text | |
+| `centro_costo` | text | |
+| `metodo_pago` | text | |
+| `pagado` | text | `'POR PAGAR'` or `'PAGADO'` — col AA (index 26). Sheet is authoritative. |
+| `aprobado` | text | `'SI'`, `'NO'`, or null — col AB (index 27). App writes this TO the sheet; sheet syncs it back. |
+| `orden_prioridad` | text | Col AC (index 28). Same write direction as aprobado. |
+| `doc_url` / `comprobante_url` / `bot_email` | text | |
+| `created_at` / `updated_at` | timestamptz | |
+
+**Sync architecture — CRITICAL rules:**
+
+| Direction | Columns | Rule |
+|-----------|---------|------|
+| Sheet → Supabase | ALL columns | Sheet **always wins** — direct assignment, no COALESCE |
+| Supabase → Sheet | `aprobado` (col AB), `orden_prioridad` (col AC) only | App writes via `update-xpp` or `approve-cxp` edge functions |
+
+- **Never DELETE rows.** Historical rows (`pagado='PAGADO'`) must persist for reconciliation. Sync is UPSERT only.
+- **`supabase_id` column was dropped from DB on 2026-05-25.** NEVER re-add it. The sheet column AI (range index 34) is `sheet_uuid`, not supabase_id.
+- **Two sync mechanisms run concurrently:**
+  1. **pg_cron (primary):** `sync-cxp-every-10min` job fires every 10 minutes → calls the `sync-cxp` Edge Function. Enabled in `supabase/migrations/*_cxp_setup.sql`.
+  2. **Vercel cron (secondary):** `api/cron/sync-cxp.ts` in hh-accounts, runs daily at 13:00 UTC → calls the `upsert_cxp_from_sheet` RPC.
+
+Both use `sheet_uuid` (range index 34) as the conflict key. Both apply sheet-wins semantics. Both normalize `aprobado` (blank → null, TRUE/SI/SÍ → 'SI', else → 'NO').
+
+### `accounts_transactions` (shared — owned by hh-accounts)
+
+The primary structured transaction ledger. All amounts are always **positive**; the `type` field determines direction.
+
+| Column | Type | Notes |
+|--------|------|-------|
+| id | uuid PK | |
+| type | text | `'expense'` (money out) · `'sales_allocation'` (money in) · `'transfer_in'` / `'transfer_out'` (ignore for top-20) · `'previous_balance'` |
+| amount | numeric | Always positive |
+| currency | text | `'COP'`, `'USD'`, `'GBP'`, `'EUR'` |
+| transaction_date | date | |
+| company_id | uuid FK | → `companies(id)` — which HH entity. Resolve to empresa code via `companies.name`. |
+| supplier_id | uuid FK | → `accounts_suppliers(id)` — set for `type='expense'` |
+| cost_centre | text | |
+| receipt_url | text | |
+| user_id / cashapp_user_id | uuid | CashApp user, if applicable |
+
+hh-suppliers reads this table for the top-20 supplier list (type='expense'). Never writes except during supplier merge (reparenting supplier_id). `sales_allocation` rows have no client NIT so are excluded from the clients top-20.
+
+### `wise_transactions` (shared — owned by hh-accounts)
+
+Wise bank/card transactions. Reconciliation fields (`nit`, `empresa`, `proveedor`) are populated manually in hh-accounts.
+
+| Column | Type | Notes |
+|--------|------|-------|
+| reference_number | text PK | |
+| date | date | |
+| amount_value | numeric | Absolute amount in `amount_currency`. Always positive for DEBIT/CREDIT. |
+| amount_currency | text | `'USD'`, `'GBP'`, `'EUR'`, `'COP'` |
+| type | text | `'DEBIT'` (expense) · `'CREDIT'` (income) |
+| details_type | text | `'CARD'`, `'TRANSFER'`, etc. |
+| empresa | text | HH entity code (BA, TH, …) — set after reconciliation |
+| nit | text | Counterparty NIT — set after reconciliation |
+| proveedor | text | Counterparty name — set after reconciliation |
+| counterparty_name | text | Raw counterparty from Wise |
+| concepto | text | |
+
+hh-suppliers reads this table for both top-20 lists. Only rows with `nit IS NOT NULL AND empresa IS NOT NULL` are included (reconciled).
+
+### `mercury_transactions` (shared — owned by hh-accounts)
+
+Mercury bank/card transactions. Same reconciliation pattern as wise_transactions.
+
+| Column | Type | Notes |
+|--------|------|-------|
+| id | text PK | |
+| posted_at | timestamptz | Use `.slice(0,10)` for date lookups |
+| amount | numeric | Negative = expense (money out). Positive = income (money in). |
+| currency | text | `'USD'`, `'GBP'`, `'EUR'`, `'COP'` |
+| kind | text | `'creditCardTransaction'`, `'outgoingPayment'`, `'incomingPayment'`, etc. |
+| empresa | text | HH entity code — set after reconciliation |
+| nit | text | Counterparty NIT — set after reconciliation |
+| proveedor | text | Counterparty name — set after reconciliation |
+| counterparty_name | text | Raw counterparty from Mercury |
+
+hh-suppliers reads this for both top-20 lists (negative = suppliers, positive = clients). Only reconciled rows (nit + empresa not null) included.
+
+### `trm_daily` (shared — owned by hh-accounts)
+
+Daily exchange rates used to convert non-COP amounts to COP.
+
+| Column | Type | Notes |
+|--------|------|-------|
+| date | date PK | |
+| usd_cop | numeric | USD → COP rate |
+| gbp_cop | numeric | GBP → COP rate |
+| eur_cop | numeric | EUR → COP rate |
+
+Pattern: fetch for the period sorted descending. For each transaction, find the first row where `date <= transaction_date` (most recent rate on or before that date).
+
+### `companies` (shared — owned by hh-accounts)
+
+HH legal entities. Used to resolve `accounts_transactions.company_id` → empresa code.
+
+| Column | Type | Notes |
+|--------|------|-------|
+| id | uuid PK | |
+| name | text | Empresa code (BA, TH, GA, PM, MA, HH, AB, AW, CR, etc.) |
+
+### `accounts_bancos` (shared — owned by hh-accounts)
+
+The primary transactions ledger for Hart Hospitality. Populated by hh-accounts from Google Sheets named ranges (BANCOS, CASHAPP, TARSCOL, EXTRA) and other sources. hh-suppliers reads it but never writes to it.
+
+Columns used by hh-suppliers: `nit`, `importe_cop`, `empresa`, `fecha_operacion`, `fecha_factura`, `proveedor`, `monto_base`, `total_iva`, `total_ipc`, `rete_fuente`, `rete_ica`, `concepto`, `centro_costo`, `no_factura`, `doc_url`, `range_source`.
+
+`range_source` identifies the origin sheet range (equivalent to `source` in the old `transactions_cache` schema). Do not attempt to write to this table from hh-suppliers.
+
+### `accounts_transactions` (shared — owned by hh-accounts)
+
+Structured transaction records linked to `accounts_suppliers` by `supplier_id`. hh-suppliers writes to it only during the supplier merge flow (to reparent transactions from the absorbed supplier to the survivor). Schema not fully documented here — treat as hh-accounts territory.
+
+### `contact_supplier_links` (shared — owned by hh-crm)
+
+Junction table linking CRM contacts to supplier profiles. Queried by the Contactos CRM tab via a Supabase join: `contact_supplier_links(id, contact_id, role, is_primary, contacts(first_name, last_name, email, phone))`. hh-suppliers reads only — links are created from the CRM app.
+
+### `transactions_cache` (legacy — no longer queried by hh-suppliers)
+
+Cache of expense transactions from Google Sheets ranges. Full DELETE + INSERT on each sync (not upsert). Synced by `sync-transactions-cache` edge function from BANCOS, CASHAPP, TARSCOL, EXTRA named ranges. **hh-suppliers frontend no longer queries this table** — it now reads `accounts_bancos` instead. The edge function and table may still exist for other consumers.
 
 | Column | Type | Notes |
 |--------|------|-------|
@@ -363,14 +522,9 @@ Cache of expense transactions from Google Sheets ranges. Full DELETE + INSERT on
 | no_fac / moneda / pagado / aprobado / orden_prioridad / doc_url | text | |
 | synced_at | timestamptz | |
 
-### `cuentas_por_pagar_cache`
+### `cuentas_por_pagar_cache` (legacy — no longer queried by hh-suppliers)
 
-Cache of outstanding payables from the CPP named range. Same structure as `transactions_cache` minus `pagado`; adds `aprobado text`. Full reload on sync.
-
-Used by SearchPage action cards:
-- Facturas Aprobadas: `aprobado = 'SI'`
-- Facturas Pendiente Aprobación: `aprobado != 'SI'` AND `fecha_vencimiento <= end of current month`
-- Cartera Vencida: `fecha_vencimiento < today`
+Cache of outstanding payables from the CPP named range. Same structure as `transactions_cache` minus `pagado`; adds `aprobado text`. Full reload on sync. **hh-suppliers now uses `cxp_facturas` for payables data.** This table may still be used by other apps.
 
 ### `suppliers_spend_monthly`
 
@@ -400,6 +554,7 @@ All are Deno runtime. All have origin-restricted CORS: allow `prov.portiahart.co
 | `sync-pago-inmediato` | One-time manual | Reads DATABASEOLD col N (`Pago Inmediato`) from Google Sheets; sets `accounts_suppliers.pago_inmediato` boolean by NIT. Run once to seed; manage manually in-app thereafter. |
 | `sync-supplier-spend-2025` | Manual / scheduled | Builds `suppliers_spend_monthly` from historical spend data |
 | `bulk-sync-banking` | Manual | Bulk populate `suppliers_banking` for many suppliers at once |
+| `sync-cxp` | pg_cron every 10 min | Reads xPP named range from Google Sheets; UPSERTs into `cxp_facturas` on `sheet_uuid`. No DELETE. Sheet wins all columns. Normalizes `aprobado`. See `cxp_facturas` schema above for full sync rules. |
 
 **Required env secrets on hh-main:**
 - `GOOGLE_SERVICE_ACCOUNT_JSON` — service account with Sheets read/write scope
