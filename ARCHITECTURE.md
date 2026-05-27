@@ -174,7 +174,7 @@ Shows per-year: active supplier count, top spenders by total COP. Useful for B C
 | `ProtectedRoute.tsx` | Redirects unauthenticated users to `/login`; passes children if session exists |
 | `DuplicatesModal.tsx` | Super-admin modal listing duplicate supplier groups (same normalized razon_social). Merge action: keeps survivor, archives absorbed record, reparents documents. |
 | `NoNitModal.tsx` | Super-admin modal listing all suppliers without a NIT, sorted alphabetically |
-| `PendingApprovalsModal.tsx` | Shows CPP rows pending approval (aprobado ≠ 'SI'); inline approve action writes back to `cuentas_por_pagar_cache`. Parses Google Sheets date serials and mixed number formats. |
+| `PendingApprovalsModal.tsx` | Shows CPP rows pending approval (aprobado ≠ 'SI'); data comes from the `get-reporte-data` edge function (xPP range). Inline approve action writes back via `approve-cxp` edge function. Parses Google Sheets date serials and mixed number formats. |
 
 ---
 
@@ -522,9 +522,6 @@ Cache of expense transactions from Google Sheets ranges. Full DELETE + INSERT on
 | no_fac / moneda / pagado / aprobado / orden_prioridad / doc_url | text | |
 | synced_at | timestamptz | |
 
-### `cuentas_por_pagar_cache` (legacy — no longer queried by hh-suppliers)
-
-Cache of outstanding payables from the CPP named range. Same structure as `transactions_cache` minus `pagado`; adds `aprobado text`. Full reload on sync. **hh-suppliers now uses `cxp_facturas` for payables data.** This table may still be used by other apps.
 
 ### `suppliers_spend_monthly`
 

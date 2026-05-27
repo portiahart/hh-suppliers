@@ -2841,10 +2841,13 @@ function formatCOPShort(n: number): string {
   return '$' + Math.round(n).toLocaleString('es-CO')
 }
 
+type CxpRetRow = { id: string; monto_base: number | null; retefuente: number | null; reteica: number | null; iva_19: number | null; iva_5: number | null; ipc: number | null }
+
 function GastoTab({ supplierId, nit }: { supplierId: string | null; nit: string | null }) {
   const { session } = useAuth()
   const [txns, setTxns] = useState<TxRow[]>([])
   const [cpp, setCpp] = useState<CppRow[]>([])
+  const [cxpRet, setCxpRet] = useState<CxpRetRow[]>([])
   const [txLoading, setTxLoading] = useState(true)
   const [entities, setEntities] = useState<EntityData[]>([])
   const [histLoading, setHistLoading] = useState(true)
@@ -2862,7 +2865,7 @@ function GastoTab({ supplierId, nit }: { supplierId: string | null; nit: string 
       type WiseRow = { reference_number: string; date: string; amount_value: number; amount_currency: string; empresa: string | null; nit: string | null; concepto: string | null; description: string | null; no_factura: string | null; fecha_factura: string | null; centro_costo: string | null; doc_url: string | null; type: string }
       type MercRow = { id: string; posted_at: string | null; amount: number; currency: string; empresa: string | null; nit: string | null; concepto: string | null; bank_description: string | null; no_factura: string | null; fecha_factura: string | null; centro_costo: string | null; doc_url: string | null }
 
-      const [{ data: txData }, { data: cppData }, { data: atData }, { data: wiseData }, { data: mercData }] = await Promise.all([
+      const [{ data: txData }, { data: cppData }, { data: atData }, { data: wiseData }, { data: mercData }, { data: cxpRetData }] = await Promise.all([
         nit
           ? supabase.from('accounts_bancos')
               .select('id, fecha_operacion, fecha_factura, proveedor, nit, importe_cop, monto_base, total_iva, total_ipc, rete_fuente, rete_ica, concepto, centro_costo, empresa, no_factura, doc_url, range_source')
@@ -2898,6 +2901,12 @@ function GastoTab({ supplierId, nit }: { supplierId: string | null; nit: string 
               .select('id, posted_at, amount, currency, empresa, nit, concepto, bank_description, no_factura, fecha_factura, centro_costo, doc_url')
               .eq('nit', nit)
               .order('posted_at', { ascending: false })
+              .limit(10000)
+          : Promise.resolve({ data: [] }),
+        nit
+          ? supabase.from('cxp_facturas')
+              .select('id, monto_base, retefuente, reteica, iva_19, iva_5, ipc')
+              .eq('nit', nit)
               .limit(10000)
           : Promise.resolve({ data: [] }),
       ])
@@ -2970,6 +2979,7 @@ function GastoTab({ supplierId, nit }: { supplierId: string | null; nit: string 
 
       setTxns(combined)
       setCpp((cppData as CppRow[]) ?? [])
+      setCxpRet((cxpRetData as CxpRetRow[]) ?? [])
       setTxLoading(false)
     })()
   }, [nit, supplierId])
@@ -3038,17 +3048,15 @@ function GastoTab({ supplierId, nit }: { supplierId: string | null; nit: string 
   const totalRecibido = pagosRecibidos.reduce((s, t) => s + (t.importe_cop ?? 0), 0)
   const totalHecho = pagosHechos.reduce((s, t) => s + (t.importe_cop ?? 0), 0)
 
-  const retRows = (
-    [
-      { label: 'Rete Fuente', field: 'rete_fuente' },
-      { label: 'Rete ICA',    field: 'rete_ica' },
-      { label: 'IVA',         field: 'total_iva' },
-      { label: 'IPC',         field: 'total_ipc' },
-    ] as const
-  ).map(({ label, field }) => {
-    const rel = txns.filter(t => ((t[field as keyof TxRow] as number | null) ?? 0) > 0)
-    const total = rel.reduce((s, t) => s + ((t[field as keyof TxRow] as number) ?? 0), 0)
-    const baseSum = rel.reduce((s, t) => s + (t.monto_base ?? 0), 0)
+  const retRows = [
+    { label: 'Rete Fuente', getVal: (r: CxpRetRow) => r.retefuente ?? 0 },
+    { label: 'Rete ICA',    getVal: (r: CxpRetRow) => r.reteica ?? 0 },
+    { label: 'IVA',         getVal: (r: CxpRetRow) => (r.iva_19 ?? 0) + (r.iva_5 ?? 0) },
+    { label: 'IPC',         getVal: (r: CxpRetRow) => r.ipc ?? 0 },
+  ].map(({ label, getVal }) => {
+    const rel = cxpRet.filter(r => getVal(r) > 0)
+    const total = rel.reduce((s, r) => s + getVal(r), 0)
+    const baseSum = rel.reduce((s, r) => s + (r.monto_base ?? 0), 0)
     return { label, total, tasa: baseSum > 0 ? (total / baseSum) * 100 : null, count: rel.length }
   })
 
