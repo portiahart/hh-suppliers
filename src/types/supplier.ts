@@ -26,4 +26,5 @@ export interface Supplier {
   bic_synced_at: string | null
   // Payment specifics — imported once from DATABASEOLD col N, managed in-app thereafter
   pago_inmediato: boolean | null
+  notificar_pagos: boolean | null
 }
