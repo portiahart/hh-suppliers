@@ -32,7 +32,7 @@ export function SupplierProfile() {
     void (async () => {
       const { data, error } = await supabase
         .from('accounts_suppliers')
-        .select('id, razon_social, nombre_operativo, nit, documento_tipo, tipo_persona, email, telefono, categoria, status, archived_at, created_at, updated_at, bic_survey_score, bic_ubicacion, bic_categoria, bic_physical_goods, bic_independent, bic_underserved, bic_small_company, bic_minoria, bic_synced_at, pago_inmediato')
+        .select('id, razon_social, nombre_operativo, nit, documento_tipo, tipo_persona, email, telefono, categoria, status, archived_at, created_at, updated_at, bic_survey_score, bic_ubicacion, bic_categoria, bic_physical_goods, bic_independent, bic_underserved, bic_small_company, bic_minoria, bic_synced_at, pago_inmediato, notificar_pagos')
         .eq('id', id)
         .single()
       if (!error) setSupplier(data as Supplier)
@@ -808,29 +808,60 @@ function EspecificidadPagoCard({ supplier, loading, supplierId, onUpdate }: {
   supplierId: string | null
   onUpdate: (s: Supplier) => void
 }) {
-  const [saving, setSaving] = useState(false)
+  const [savingInmediato, setSavingInmediato] = useState(false)
+  const [savingNotificar, setSavingNotificar] = useState(false)
   const [toast, setToast] = useState<string | null>(null)
   const showToast = (msg: string) => { setToast(msg); setTimeout(() => setToast(null), 3500) }
 
-  const handleToggle = async () => {
-    if (!supplierId || !supplier || saving) return
+  const handleToggleInmediato = async () => {
+    if (!supplierId || !supplier || savingInmediato) return
     const next = !(supplier.pago_inmediato ?? false)
-    setSaving(true)
+    setSavingInmediato(true)
     const { data, error } = await supabase
       .from('accounts_suppliers')
       .update({ pago_inmediato: next, updated_at: new Date().toISOString() })
       .eq('id', supplierId)
       .select()
       .single()
-    if (error) {
-      showToast(`Error al guardar: ${error.message}`)
-    } else {
-      onUpdate(data as Supplier)
-    }
-    setSaving(false)
+    if (error) { showToast(`Error al guardar: ${error.message}`) } else { onUpdate(data as Supplier) }
+    setSavingInmediato(false)
   }
 
-  const checked = supplier?.pago_inmediato ?? false
+  const handleToggleNotificar = async () => {
+    if (!supplierId || !supplier || savingNotificar) return
+    const next = !(supplier.notificar_pagos ?? false)
+    setSavingNotificar(true)
+    const { data, error } = await supabase
+      .from('accounts_suppliers')
+      .update({ notificar_pagos: next, updated_at: new Date().toISOString() })
+      .eq('id', supplierId)
+      .select()
+      .single()
+    if (error) { showToast(`Error al guardar: ${error.message}`) } else { onUpdate(data as Supplier) }
+    setSavingNotificar(false)
+  }
+
+  const checkedInmediato = supplier?.pago_inmediato ?? false
+  const checkedNotificar = supplier?.notificar_pagos ?? false
+
+  const checkboxLabel = (checked: boolean, saving: boolean, onToggle: () => void, label: string) => (
+    <label style={{
+      display: 'inline-flex', alignItems: 'center', gap: 10,
+      cursor: saving ? 'default' : 'pointer',
+      opacity: saving ? 0.6 : 1,
+      fontFamily: 'var(--font-body)', fontSize: '0.875rem',
+      fontWeight: 300, color: 'var(--hh-dark)',
+    }}>
+      <input
+        type="checkbox"
+        checked={checked}
+        onChange={() => void onToggle()}
+        disabled={saving}
+        style={{ width: 16, height: 16, cursor: saving ? 'default' : 'pointer', accentColor: 'var(--hh-teal)' }}
+      />
+      {label}
+    </label>
+  )
 
   return (
     <>
@@ -847,22 +878,10 @@ function EspecificidadPagoCard({ supplier, loading, supplierId, onUpdate }: {
         {loading ? (
           <SkeletonFields />
         ) : (
-          <label style={{
-            display: 'inline-flex', alignItems: 'center', gap: 10,
-            cursor: saving ? 'default' : 'pointer',
-            opacity: saving ? 0.6 : 1,
-            fontFamily: 'var(--font-body)', fontSize: '0.875rem',
-            fontWeight: 300, color: 'var(--hh-dark)',
-          }}>
-            <input
-              type="checkbox"
-              checked={checked}
-              onChange={() => void handleToggle()}
-              disabled={saving}
-              style={{ width: 16, height: 16, cursor: saving ? 'default' : 'pointer', accentColor: 'var(--hh-teal)' }}
-            />
-            Inmediato
-          </label>
+          <div style={{ display: 'flex', gap: 32 }}>
+            {checkboxLabel(checkedInmediato, savingInmediato, handleToggleInmediato, 'Inmediato')}
+            {checkboxLabel(checkedNotificar, savingNotificar, handleToggleNotificar, 'Notificar Pagos')}
+          </div>
         )}
       </SectionCard>
     </>
@@ -2915,8 +2934,8 @@ function GastoTab({ supplierId, nit }: { supplierId: string | null; nit: string 
       const atRows = (atData ?? []) as AtRow[]
       let compMap = new Map<string, string>()
       if (atRows.length > 0) {
-        const { data: compData } = await supabase.from('companies').select('id, name')
-        compMap = new Map(((compData ?? []) as { id: string; name: string }[]).map(c => [c.id, c.name]))
+        const { data: compData } = await supabase.from('companies').select('id, display_name')
+        compMap = new Map(((compData ?? []) as { id: string; display_name: string }[]).map(c => [c.id, c.display_name]))
       }
 
       const atTxRows: TxRow[] = atRows.map(r => ({
@@ -3201,7 +3220,7 @@ function GastoTab({ supplierId, nit }: { supplierId: string | null; nit: string 
                     <td style={{ textAlign: 'right' }}><span style={{ fontFamily: 'var(--font-numeric)', fontVariantNumeric: 'tabular-nums', color: 'var(--hh-teal)', whiteSpace: 'nowrap' }}>{formatCOPFull(t.importe_cop ?? 0)}</span></td>
                     <td><EmpresaPill empresa={t.empresa} /></td>
                     <td>{t.range_source ?? 'BANCOS'}</td>
-                    <td>{t.doc_url && t.no_factura ? <a href={t.doc_url} target="_blank" rel="noopener noreferrer" className="hh-link">{t.no_factura}</a> : <span style={{ color: t.no_factura ? 'var(--hh-teal)' : 'var(--hh-haze)' }}>{t.no_factura ?? 'N/A'}</span>}</td>
+                    <td>{t.doc_url ? <a href={t.doc_url} target="_blank" rel="noopener noreferrer" className="hh-link">{t.no_factura ?? 'Ver'}</a> : <span style={{ color: t.no_factura ? 'var(--hh-teal)' : 'var(--hh-haze)' }}>{t.no_factura ?? 'N/A'}</span>}</td>
                   </tr>
                 ))}
               </tbody>
@@ -3258,7 +3277,7 @@ function GastoTab({ supplierId, nit }: { supplierId: string | null; nit: string 
                     <td style={{ textAlign: 'right' }}><span style={{ fontFamily: 'var(--font-numeric)', fontVariantNumeric: 'tabular-nums', color: 'var(--hh-mango)', whiteSpace: 'nowrap' }}>{formatCOPFull(t.importe_cop ?? 0)}</span></td>
                     <td><EmpresaPill empresa={t.empresa} /></td>
                     <td>{t.range_source ?? 'BANCOS'}</td>
-                    <td>{t.doc_url && t.no_factura ? <a href={t.doc_url} target="_blank" rel="noopener noreferrer" className="hh-link">{t.no_factura}</a> : <span style={{ color: t.no_factura ? 'var(--hh-teal)' : 'var(--hh-haze)' }}>{t.no_factura ?? 'N/A'}</span>}</td>
+                    <td>{t.doc_url ? <a href={t.doc_url} target="_blank" rel="noopener noreferrer" className="hh-link">{t.no_factura ?? 'Ver'}</a> : <span style={{ color: t.no_factura ? 'var(--hh-teal)' : 'var(--hh-haze)' }}>{t.no_factura ?? 'N/A'}</span>}</td>
                   </tr>
                 ))}
               </tbody>
