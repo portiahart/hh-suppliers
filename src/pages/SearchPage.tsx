@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { MagnifyingGlassIcon } from '@radix-ui/react-icons'
 import { supabase, suppliersQuery } from '../lib/supabase'
 import type { Supplier } from '../types/supplier'
+import { ENTITY_COLORS } from '../lib/entityColors'
 
 /* ─── Types ──────────────────────────────────────────────── */
 
@@ -25,16 +26,7 @@ type MercRow   = { amount: number; currency: string; posted_at: string | null; e
 
 interface Assessment { supplier_id: string; pass: boolean | null }
 
-const ENTITY_COLORS: Record<string, { bg: string; text: string }> = {
-  BA: { bg: '#566778', text: '#fff' },
-  TH: { bg: '#B9484E', text: '#fff' },
-  PM: { bg: '#FC0083', text: '#fff' },
-  GA: { bg: '#98B250', text: '#658D5E' },
-  NC: { bg: '#EAB955', text: '#B9484E' },
-  MO: { bg: '#000000', text: '#fff' },
-  HH: { bg: '#0f172a', text: '#F2F5F8' },
-  MA: { bg: '#0f172a', text: '#F2F5F8' },
-}
+// Company pill colours mirror public.companies.brand_colour — see ../lib/entityColors.
 
 /* ─── Helpers ────────────────────────────────────────────── */
 

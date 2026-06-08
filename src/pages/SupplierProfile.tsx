@@ -9,6 +9,7 @@ import type { RetencionRecomendada, RUTData } from '../lib/rutTypes'
 import { CIIU_LABELS, RESPONSABILIDADES_LABELS } from '../lib/rutLookups'
 import { ExcelDownloadButton } from '../components/ExcelDownloadButton'
 import { exportTableToExcel } from '../lib/export-utils'
+import { ENTITY_COLORS } from '../lib/entityColors'
 
 const TABS = ['General', 'Bancario', 'Evaluación', 'B Corp', 'Gasto', 'Contactos CRM'] as const
 type Tab = typeof TABS[number]
@@ -2841,12 +2842,7 @@ interface EntityData {
   years: YearData[]
 }
 
-const ENTITY_COLORS: Record<string, { bg: string; text: string }> = {
-  BA: { bg: '#566778', text: '#fff' },
-  TH: { bg: '#B9484E', text: '#fff' },
-  PM: { bg: '#FC0083', text: '#fff' },
-  GA: { bg: '#98B250', text: '#fff' },
-}
+// Company pill colours mirror public.companies.brand_colour — see ../lib/entityColors.
 
 const MONTH_LABELS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
 
