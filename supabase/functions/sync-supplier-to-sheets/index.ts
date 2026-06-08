@@ -102,6 +102,7 @@ function deriveHeaders(sampleRow: Record<string, unknown>): string[] {
   return [...known, ...extra]
 }
 
+
 function rowValues(headers: string[], row: Record<string, unknown>): string[] {
   return headers.map(h => {
     const v = row[h]
@@ -202,19 +203,31 @@ async function handleFullSync(token: string): Promise<{ synced: number }> {
     from += PAGE
   }
 
-  if (allData.length === 0) {
-    await sheetsClear(`${SHEET_NAME}!A2:ZZ`, token)
-    return { synced: 0 }
-  }
-
   const data = allData
 
-  const headers = deriveHeaders(data[0] as Record<string, unknown>)
-  const rows    = data.map(r => rowValues(headers, r as Record<string, unknown>))
+  const existingHeaders = await readHeaders(token)
+  const headers = existingHeaders.length > 0
+    ? existingHeaders
+    : deriveHeaders(data[0] as Record<string, unknown>)
 
-  // Write headers + clear old data, then write all rows
-  await sheetsPut(`${SHEET_NAME}!A1`, [headers], token)
-  await sheetsClear(`${SHEET_NAME}!A2:ZZ`, token)
+  // Only write headers when the sheet is blank (first-time setup).
+  // Row 1 may be protected — managing headers is the owner's responsibility.
+  if (existingHeaders.length === 0) {
+    await sheetsPut(`${SHEET_NAME}!A1`, [headers], token)
+  }
+
+  // Pad every row to PAD_COLS wide so that extra columns written by previous
+  // syncs are overwritten with empty strings rather than left behind.
+  // Avoids sheetsClear which may conflict with sheet protection settings.
+  const PAD_COLS = Math.max(headers.length + 20, 50)
+  const rows = data.map(r => {
+    const vals = rowValues(headers, r as Record<string, unknown>)
+    while (vals.length < PAD_COLS) vals.push('')
+    return vals
+  })
+
+  if (allData.length === 0) return { synced: 0 }
+
   await sheetsPut(`${SHEET_NAME}!A2`, rows, token)
 
   return { synced: rows.length }
@@ -231,7 +244,6 @@ async function handleInsert(record: Record<string, unknown>, token: string): Pro
     return
   }
 
-  // Use the sheet's existing column order so values land in the right columns
   await sheetsAppend([rowValues(existingHeaders, record)], token)
 }
 
@@ -248,13 +260,8 @@ async function handleUpdate(record: Record<string, unknown>, token: string): Pro
   const row = await findRowById(id, token)
 
   if (row) {
-    await sheetsPut(
-      `${SHEET_NAME}!A${row}`,
-      [rowValues(existingHeaders, record)],
-      token,
-    )
+    await sheetsPut(`${SHEET_NAME}!A${row}`, [rowValues(existingHeaders, record)], token)
   } else {
-    // Row missing — append
     await sheetsAppend([rowValues(existingHeaders, record)], token)
   }
 }

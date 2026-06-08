@@ -91,7 +91,7 @@ async function fetchRange(accessToken: string): Promise<unknown[][]> {
   return (data.values ?? []) as unknown[][]
 }
 
-/* ─── Column positions (from import script, 0-based) ────────────────────── */
+/* ─── Column positions (0-based within xPP named range) ─────────────────── */
 
 const C = {
   fecha_pago:       0,
@@ -116,16 +116,15 @@ const C = {
   tipo_documento:  23,
   empresa:         24,
   fecha_vencimiento: 25,
-  pagado:          26,
-  aprobado:        27,
-  orden_prioridad: 28,
+  pagado:          26,  // col AA — POR PAGAR / PAGADO (sheet is authoritative)
+  aprobado:        27,  // col AB — written by app (approve-cxp / update-xpp), then synced back
+  orden_prioridad: 28,  // col AC — written by app, then synced back
   doc_url:         29,
   comprobante_url: 30,
   iva_5:           31,
   otros_exentos:   32,
   bot_email:       33,
-  supabase_id:     34,
-  sheet_uuid:      35,
+  sheet_uuid:      34,  // col AI — permanent row identifier (consistent with hh-accounts cron)
 } as const
 
 /* ─── Parsing helpers ────────────────────────────────────────────────────── */
@@ -158,7 +157,6 @@ function parseSheetDate(value: unknown): string | null {
     if (dmy) return new Date(Date.UTC(+dmy[3], +dmy[2] - 1, +dmy[1])).toISOString().slice(0, 10)
     const ymd = s.match(/^(\d{4})[/\-](\d{1,2})[/\-](\d{1,2})$/)
     if (ymd) return new Date(Date.UTC(+ymd[1], +ymd[2] - 1, +ymd[3])).toISOString().slice(0, 10)
-    // "30-Oct-2024" format from legacy CSV
     const MONTHS: Record<string, number> = { Jan:1,Feb:2,Mar:3,Apr:4,May:5,Jun:6,Jul:7,Aug:8,Sep:9,Oct:10,Nov:11,Dec:12 }
     const mon = s.match(/^(\d{1,2})[-\s]([A-Za-z]{3})[-\s](\d{4})$/)
     if (mon && MONTHS[mon[2]]) {
@@ -191,9 +189,11 @@ function parseNumber(val: unknown): number {
   return parseFloat(cleaned) || 0
 }
 
-function parseAprobado(raw: string): string {
+// Normalize aprobado: 'TRUE'/'SI'/'SÍ' → 'SI', blank/null → null, anything else → 'NO'
+function normalizeAprobado(raw: string): string | null {
+  if (!raw.trim()) return null
   const v = raw.toUpperCase()
-  return v === 'TRUE' || v === 'SI' || v === 'SÍ' ? 'SI' : 'NO'
+  return (v === 'TRUE' || v === 'SI' || v === 'SÍ') ? 'SI' : 'NO'
 }
 
 function isUrl(s: string) { return s.startsWith('http://') || s.startsWith('https://') }
@@ -201,14 +201,19 @@ function isUrl(s: string) { return s.startsWith('http://') || s.startsWith('http
 /* ─── Row builder ────────────────────────────────────────────────────────── */
 
 function buildRecord(row: unknown[], sheetRowNum: number) {
+  const uuid = cellStr(row, C.sheet_uuid)
+  if (!uuid) return null // rows without sheet_uuid cannot be upserted
+
   const proveedor  = cellStr(row, C.proveedor) || cellStr(row, C.proveedor_a) || null
   const valorTotal = Math.abs(parseNumber(cellRaw(row, C.valor_total)))
   if (!proveedor && valorTotal === 0) return null
 
-  const docUrl  = cellStr(row, C.doc_url)
-  const cmpUrl  = cellStr(row, C.comprobante_url)
+  const docUrl = cellStr(row, C.doc_url)
+  const cmpUrl = cellStr(row, C.comprobante_url)
 
   return {
+    sheet_uuid:       uuid,
+    sheet_row_num:    sheetRowNum,
     proveedor,
     nit:              (() => { const v = cellStr(row, C.nit); return v && /^\d/.test(v) ? v : null })(),
     no_factura:       cellStr(row, C.no_factura) || null,
@@ -233,14 +238,11 @@ function buildRecord(row: unknown[], sheetRowNum: number) {
     centro_costo:     cellStr(row, C.centro_costo) || null,
     metodo_pago:      cellStr(row, C.metodo_pago) || null,
     pagado:           cellStr(row, C.pagado) || null,
-    aprobado:         parseAprobado(cellStr(row, C.aprobado)),
+    aprobado:         normalizeAprobado(cellStr(row, C.aprobado)),
     orden_prioridad:  cellStr(row, C.orden_prioridad) || null,
     doc_url:          isUrl(docUrl) ? docUrl : null,
     comprobante_url:  isUrl(cmpUrl) ? cmpUrl : null,
-    sheet_uuid:       cellStr(row, C.sheet_uuid) || null,
-    supabase_id:      cellStr(row, C.supabase_id) || null,
     bot_email:        cellStr(row, C.bot_email) || null,
-    sheet_row_num:    sheetRowNum,
   }
 }
 
@@ -257,7 +259,6 @@ Deno.serve(async (req: Request) => {
     const credentials: ServiceAccountCredentials = JSON.parse(credJson)
     const accessToken = await getGoogleAccessToken(credentials)
 
-    // Fetch metadata and data in parallel
     const [startRowIndex, rows] = await Promise.all([
       getNamedRangeStartRow(accessToken),
       fetchRange(accessToken),
@@ -267,8 +268,7 @@ Deno.serve(async (req: Request) => {
       return new Response(JSON.stringify({ synced: 0, message: 'No data rows in range' }), { headers })
     }
 
-    // startRowIndex is 0-based. Sheet row num for data row i (0-based):
-    //   startRowIndex + 1 (to 1-based) + 1 (skip header) + i = startRowIndex + 2 + i
+    // startRowIndex + 2: convert 0-based range start to 1-based sheet row, skipping header
     const records = rows.slice(1)
       .map((row, i) => buildRecord(row, startRowIndex + 2 + i))
       .filter((r): r is NonNullable<typeof r> => r !== null)
@@ -278,20 +278,21 @@ Deno.serve(async (req: Request) => {
       Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!,
     )
 
-    // Full reload — delete all then insert fresh
-    const { error: delErr } = await supabase.from('cxp_facturas').delete().not('id', 'is', null)
-    if (delErr) throw new Error(`DELETE failed: ${delErr.message}`)
-
+    // UPSERT — Google Sheet is always authoritative for all columns.
+    // Conflict key: sheet_uuid (unique index on cxp_facturas).
+    // We never DELETE rows: historical records (pagado='PAGADO') must persist for reconciliation.
     const BATCH = 200
-    let inserted = 0
+    let synced = 0
     const errors: string[] = []
     for (let i = 0; i < records.length; i += BATCH) {
-      const { error } = await supabase.from('cxp_facturas').insert(records.slice(i, i + BATCH))
+      const { error } = await supabase
+        .from('cxp_facturas')
+        .upsert(records.slice(i, i + BATCH), { onConflict: 'sheet_uuid' })
       if (error) { errors.push(`Batch ${Math.floor(i / BATCH)}: ${error.message}`); break }
-      inserted += Math.min(BATCH, records.length - i)
+      synced += Math.min(BATCH, records.length - i)
     }
 
-    return new Response(JSON.stringify({ synced: inserted, total: records.length, errors }), { headers })
+    return new Response(JSON.stringify({ synced, total: records.length, errors }), { headers })
 
   } catch (err) {
     console.error('sync-cxp error:', err)
