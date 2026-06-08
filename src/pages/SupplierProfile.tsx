@@ -2877,7 +2877,7 @@ function GastoTab({ supplierId, nit }: { supplierId: string | null; nit: string 
     if (!nit && !supplierId) { setTxLoading(false); return }
     void (async () => {
       type AtRow   = { id: string; amount: number; currency: string; transaction_date: string; company_id: string | null; description: string | null; cost_centre: string | null; receipt_url: string | null }
-      type WiseRow = { reference_number: string; date: string; amount_value: number; amount_currency: string; empresa: string | null; nit: string | null; concepto: string | null; description: string | null; no_factura: string | null; fecha_factura: string | null; centro_costo: string | null; doc_url: string | null; type: string }
+      type WiseRow = { reference_number: string; date: string; amount_value: number; amount_currency: string; original_amount_value: number | null; original_amount_currency: string | null; empresa: string | null; nit: string | null; concepto: string | null; description: string | null; no_factura: string | null; fecha_factura: string | null; centro_costo: string | null; doc_url: string | null; type: string }
       type MercRow = { id: string; posted_at: string | null; amount: number; currency: string; empresa: string | null; nit: string | null; concepto: string | null; bank_description: string | null; no_factura: string | null; fecha_factura: string | null; centro_costo: string | null; doc_url: string | null }
 
       const [{ data: txData }, { data: cppData }, { data: atData }, { data: wiseData }, { data: mercData }, { data: cxpRetData }] = await Promise.all([
@@ -2906,7 +2906,7 @@ function GastoTab({ supplierId, nit }: { supplierId: string | null; nit: string 
           : Promise.resolve({ data: [] }),
         nit
           ? supabase.from('wise_transactions')
-              .select('reference_number, date, amount_value, amount_currency, empresa, nit, concepto, description, no_factura, fecha_factura, centro_costo, doc_url, type')
+              .select('reference_number, date, amount_value, amount_currency, original_amount_value, original_amount_currency, empresa, nit, concepto, description, no_factura, fecha_factura, centro_costo, doc_url, type')
               .eq('nit', nit)
               .order('date', { ascending: false })
               .limit(10000)
@@ -2957,7 +2957,15 @@ function GastoTab({ supplierId, nit }: { supplierId: string | null; nit: string 
         fecha_factura: r.fecha_factura,
         proveedor: null,
         nit,
-        importe_cop: r.type === 'DEBIT' ? -(r.amount_value) : r.amount_value,
+        // amount_value is already signed (DEBIT negative). Use Wise's real COP
+        // (original_amount_value when the purchase was in COP); fall back to the
+        // native magnitude otherwise. Sign comes from the transaction type.
+        importe_cop: (() => {
+          const cop = (r.original_amount_currency ?? '').toUpperCase() === 'COP' && r.original_amount_value != null
+            ? r.original_amount_value
+            : Math.abs(r.amount_value);
+          return r.type === 'DEBIT' ? -cop : cop;
+        })(),
         monto_base: r.amount_value,
         total_iva: null, total_ipc: null, rete_fuente: null, rete_ica: null,
         concepto: r.concepto ?? r.description,
